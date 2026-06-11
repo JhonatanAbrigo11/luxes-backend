@@ -1,4 +1,23 @@
 services:
+  db:
+    image: postgres:15-alpine
+    container_name: luxes-db
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:5432:5432"
+    environment:
+      POSTGRES_USER: ${DB_USER:-luxes}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-luxes123}
+      POSTGRES_DB: ${DB_NAME:-luxes_prod}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-luxes} -d ${DB_NAME:-luxes_prod}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
   backend:
     build:
       context: .
@@ -10,9 +29,13 @@ services:
     environment:
       PORT: 3000
       NODE_ENV: production
-      JWT_SECRET: ${JWT_SECRET:-luxes-dev-secret-change-me}
-      JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-8h}
+      JWT_SECRET: ${JWT_SECRET:-luxes-prod-secret-change-me}
+      JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-7d}
       CORS_ORIGIN: ${CORS_ORIGIN:-http://localhost:8080}
+      DATABASE_URL: postgresql://${DB_USER:-luxes}:${DB_PASSWORD:-luxes123}@db:5432/${DB_NAME:-luxes_prod}?schema=public
+    depends_on:
+      db:
+        condition: service_healthy
     healthcheck:
       test:
         [
@@ -24,7 +47,7 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
-      start_period: 10s
+      start_period: 15s
 
   frontend:
     build:
@@ -37,3 +60,7 @@ services:
     depends_on:
       backend:
         condition: service_healthy
+
+volumes:
+  postgres_data:
+

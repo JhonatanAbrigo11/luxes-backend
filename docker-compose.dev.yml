@@ -1,4 +1,17 @@
 services:
+  db:
+    image: postgres:15-alpine
+    container_name: luxes-db-dev
+    restart: unless-stopped
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: ${DB_USER:-luxes}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-luxes123}
+      POSTGRES_DB: ${DB_NAME:-luxes_dev}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
   backend:
     build:
       context: .
@@ -12,8 +25,11 @@ services:
       PORT: 3000
       NODE_ENV: development
       JWT_SECRET: ${JWT_SECRET:-luxes-dev-secret-change-me}
-      JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-8h}
+      JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-7d}
       CORS_ORIGIN: http://localhost:5173
+      DATABASE_URL: postgresql://${DB_USER:-luxes}:${DB_PASSWORD:-luxes123}@db:5432/${DB_NAME:-luxes_dev}?schema=public
+    depends_on:
+      - db
 
   frontend:
     build:
@@ -31,3 +47,7 @@ services:
       VITE_API_PROXY_TARGET: http://backend:3000
     depends_on:
       - backend
+
+volumes:
+  postgres_data:
+

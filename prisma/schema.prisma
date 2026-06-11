@@ -1,0 +1,68 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model User {
+  id            String     @id @default(uuid())
+  nombre        String
+  email         String     @unique
+  username      String     @unique
+  rol           String     @default("visor")
+  roleId        String?    @map("role_id")
+  role          Role?      @relation(fields: [roleId], references: [id], onDelete: SetNull)
+  estado        String     @default("activo")
+  passwordHash  String     @map("password_hash")
+  fechaCreacion DateTime   @default(now()) @map("fecha_creacion")
+  ultimoAcceso  DateTime?  @map("ultimo_acceso")
+  auditLogs     AuditLog[]
+
+  @@map("users")
+}
+
+model Role {
+  id          String           @id @default(uuid())
+  name        String           @unique
+  description String?
+  permissions RolePermission[]
+  users       User[]
+
+  @@map("roles")
+}
+
+model Permission {
+  id    String           @id @default(uuid())
+  key   String           @unique
+  name  String
+  roles RolePermission[]
+
+  @@map("permissions")
+}
+
+model RolePermission {
+  roleId       String     @map("role_id")
+  permissionId String     @map("permission_id")
+  role         Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission   Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@id([roleId, permissionId])
+  @@map("role_permissions")
+}
+
+model AuditLog {
+  id         String   @id @default(uuid())
+  fecha      DateTime @default(now())
+  userId     String?  @map("user_id")
+  user       User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  usuarioNom String?  @map("usuario_nom")
+  accion     String
+  modulo     String
+  detalle    String
+  severidad  String
+
+  @@map("audit_logs")
+}
