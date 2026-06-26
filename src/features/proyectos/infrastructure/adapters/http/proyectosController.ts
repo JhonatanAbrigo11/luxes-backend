@@ -355,8 +355,8 @@ export class ProyectosController {
       // Si requiere instalación, enviar notificación push y de base de datos a administradores y taller
       if (proyecto.requiereInstalacion) {
         try {
-          const rolesToNotify = ['taller', 'admin', 'administrador'];
-          for (const roleName of rolesToNotify) {
+          // UNA sola notificación por grupo de roles (taller + admin)
+          for (const roleName of ['taller', 'admin']) {
             await prisma.notification.create({
               data: {
                 title: 'Nuevo Proyecto con Instalación',
@@ -368,7 +368,7 @@ export class ProyectosController {
           }
 
           const payload = {
-            title: '🛠️ Nuevo Proyecto con Instalación',
+            title: 'Nuevo Proyecto con Instalación',
             body: `Se ha creado el proyecto "${proyecto.nombre}" con requerimiento de instalación.`,
             icon: '/LogoGlobo.png',
             badge: '/LogoGlobo.png',
@@ -380,7 +380,6 @@ export class ProyectosController {
           };
           await sendPushToRole('taller', payload);
           await sendPushToRole('admin', payload);
-          await sendPushToRole('administrador', payload);
           console.log(`[Proyecto ${proyecto.id}] Notificaciones de proyecto con instalación enviadas a administradores y taller`);
         } catch (notifError) {
           console.error('[Proyecto Create] Error enviando notificación push:', notifError);
@@ -642,18 +641,16 @@ export class ProyectosController {
               proyectoId: id,
             },
           };
-          for (const roleName of ['admin', 'administrador']) {
-            await prisma.notification.create({
-              data: {
-                title: payload.title,
-                message: payload.body,
-                rol: roleName,
-                createdBy: 'Taller',
-              },
-            });
-          }
+          // UNA sola notificación para admin (expandRoleAliases cubre 'administrador' en la query)
+          await prisma.notification.create({
+            data: {
+              title: payload.title,
+              message: payload.body,
+              rol: 'admin',
+              createdBy: 'Taller',
+            },
+          });
           await sendPushToRole('admin', payload);
-          await sendPushToRole('administrador', payload);
           console.log(`[Proyecto ${id}] Notificación de instalación iniciada enviada a administradores`);
         } catch (notifError) {
           console.error('[Proyecto] Error sending push notification for started installation:', notifError);
@@ -679,18 +676,16 @@ export class ProyectosController {
               proyectoId: id,
             },
           };
-          for (const roleName of ['admin', 'administrador']) {
-            await prisma.notification.create({
-              data: {
-                title: payload.title,
-                message: payload.body,
-                rol: roleName,
-                createdBy: 'Taller',
-              },
-            });
-          }
+          // UNA sola notificación para admin (expandRoleAliases cubre 'administrador' en la query)
+          await prisma.notification.create({
+            data: {
+              title: payload.title,
+              message: payload.body,
+              rol: 'admin',
+              createdBy: 'Taller',
+            },
+          });
           await sendPushToRole('admin', payload);
-          await sendPushToRole('administrador', payload);
           console.log(`[Proyecto ${id}] Notificación de instalación completada enviada a administradores`);
         } catch (notifError) {
           console.error('[Proyecto] Error sending push notification for completed installation:', notifError);
@@ -815,7 +810,45 @@ export class ProyectosController {
       // Construir la URL del archivo
       const archivoUrl = `/uploads/proyectos/${id}/${file.filename}`;
 
-      // Guardar la URL en la fase de diseño
+      // Obtener datos existentes de la fase de diseño
+      const faseDisenoExistente = await prisma.proyectoFase.findUnique({
+        where: {
+          proyectoId_fase: {
+            proyectoId: String(id),
+            fase: 'DISEÑO',
+          },
+        },
+      });
+
+      const datosExistentes = parseFaseDatos(faseDisenoExistente?.datos);
+
+      const nuevoArchivo = {
+        name: file.originalname,
+        size: `${(file.size / 1024 / 1024).toFixed(2)} MB`,
+        type: file.mimetype,
+        url: archivoUrl,
+      };
+
+      // Obtener arreglo de archivos actuales
+      let archivosArte: any[] = [];
+      if (Array.isArray(datosExistentes.archivosArte)) {
+        archivosArte = [...datosExistentes.archivosArte];
+      } else if (datosExistentes.archivoArte) {
+        archivosArte = [datosExistentes.archivoArte];
+      }
+
+      // Evitar duplicar el mismo archivo por URL
+      if (!archivosArte.some(f => f.url === archivoUrl)) {
+        archivosArte.push(nuevoArchivo);
+      }
+
+      const datosActualizados = {
+        ...datosExistentes,
+        archivosArte,
+        archivoArte: archivosArte[0] || null,
+      };
+
+      // Guardar en la fase de diseño
       await prisma.proyectoFase.upsert({
         where: {
           proyectoId_fase: {
@@ -824,27 +857,13 @@ export class ProyectosController {
           },
         },
         update: {
-          datos: JSON.stringify({
-            archivoArte: {
-              name: file.originalname,
-              size: `${(file.size / 1024 / 1024).toFixed(2)} MB`,
-              type: file.mimetype,
-              url: archivoUrl,
-            },
-          }),
+          datos: JSON.stringify(datosActualizados),
         },
         create: {
           proyectoId: String(id),
           fase: 'DISEÑO',
           completada: false,
-          datos: JSON.stringify({
-            archivoArte: {
-              name: file.originalname,
-              size: `${(file.size / 1024 / 1024).toFixed(2)} MB`,
-              type: file.mimetype,
-              url: archivoUrl,
-            },
-          }),
+          datos: JSON.stringify(datosActualizados),
         },
       });
 
