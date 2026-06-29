@@ -58,7 +58,11 @@ export class ComprasService {
     limit?: number;
     search?: string;
     estado?: string;
+    estados?: string[];
     estadoPago?: string;
+    creadorRol?: string;
+    creadorId?: string;
+    pendienteRecepcion?: boolean;
   }): Promise<{ items: OrdenCompraData[]; total: number }> {
     return this.repo.findAllOrdenes(options);
   }
@@ -68,7 +72,7 @@ export class ComprasService {
   }
 
   async createOrden(data: {
-    proveedorId: string;
+    proveedorId?: string;
     usuarioId: string;
     fecha?: Date;
     impuesto?: number;
@@ -76,6 +80,7 @@ export class ComprasService {
     notas?: string;
     detalles: DetalleCompraInput[];
     fechaVencimiento?: Date | null;
+    proyectoId?: string | null;
   }): Promise<OrdenCompraData> {
     if (!data.detalles || data.detalles.length === 0) {
       throw new Error('La orden debe tener al menos un item de detalle.');
@@ -88,7 +93,7 @@ export class ComprasService {
   }
 
   async updateOrden(id: string, data: {
-    proveedorId?: string;
+    proveedorId?: string | null;
     fecha?: Date;
     impuesto?: number;
     estado?: string;
@@ -96,6 +101,13 @@ export class ComprasService {
     notas?: string;
     detalles?: DetalleCompraInput[];
     aprobadoPorId?: string;
+    proyectoId?: string | null;
+    abonoMonto?: number;
+    metodoPagoId?: string;
+    abonoReferencia?: string;
+    fechaRecepcion?: Date;
+    notasRecepcion?: string;
+    recibidoPorId?: string;
   }): Promise<OrdenCompraData> {
     const orden = await this.repo.findOrdenById(id);
     if (!orden) throw new Error('Orden de compra no encontrada.');
@@ -178,18 +190,22 @@ export class ComprasService {
 
   // ── Métodos de Pago ────────────────────────────────────────────────────────
 
-  getMetodosPago(): Promise<MetodoPagoData[]> {
-    return this.repo.findAllMetodosPago();
+  getMetodosPago(desde?: Date, hasta?: Date): Promise<MetodoPagoData[]> {
+    return this.repo.findAllMetodosPago(desde, hasta);
   }
 
-  async createMetodoPago(data: { nombre: string; descripcion?: string }): Promise<MetodoPagoData> {
+  async createMetodoPago(data: { nombre: string; descripcion?: string; tipo?: string }): Promise<MetodoPagoData> {
     if (!data.nombre || !data.nombre.trim()) {
       throw new Error('El nombre del método de pago es requerido.');
     }
-    return this.repo.createMetodoPago({ ...data, nombre: data.nombre.trim() });
+    return this.repo.createMetodoPago({ 
+      ...data, 
+      nombre: data.nombre.trim(),
+      tipo: data.tipo || 'EFECTIVO'
+    });
   }
 
-  async updateMetodoPago(id: string, data: { nombre?: string; descripcion?: string; activo?: boolean }): Promise<MetodoPagoData> {
+  async updateMetodoPago(id: string, data: { nombre?: string; descripcion?: string; activo?: boolean; tipo?: string }): Promise<MetodoPagoData> {
     return this.repo.updateMetodoPago(id, data);
   }
 
@@ -211,31 +227,90 @@ export class ComprasService {
   async recepcionarOrden(
     id: string,
     usuarioId: string,
-    detallesRecibidos: { materialId?: string | null; cantidad: number }[]
+    payload: {
+      fechaRecepcion?: string;
+      notasRecepcion?: string;
+      detalles: {
+        detalleId?: string;
+        materialId?: string | null;
+        cantidad: number;
+        descargableInventario?: boolean;
+        observacion?: string;
+        fechaRecepcion?: string;
+      }[];
+    }
   ): Promise<OrdenCompraData> {
     const orden = await this.repo.findOrdenById(id);
     if (!orden) {
       throw new Error('Orden de compra no encontrada.');
     }
-    if (orden.estado !== 'aprobada') {
-      throw new Error('Solo se pueden recepcionar órdenes aprobadas.');
+    if (orden.estado !== 'aprobada' && orden.estado !== 'parcialmente_recibida') {
+      throw new Error('Solo se pueden recepcionar órdenes aprobadas o con recepción parcial.');
     }
 
-    // Adjust stocks and insert movements for inventory items
-    for (const item of detallesRecibidos) {
-      if (item.materialId && item.cantidad > 0) {
+    const ordenDetalles = orden.detalles || [];
+
+    for (const item of payload.detalles) {
+      if (item.cantidad <= 0) continue;
+
+      const detalle = ordenDetalles.find((d) => d.id === item.detalleId);
+      if (!detalle) {
+        throw new Error('Ítem de la orden no encontrado.');
+      }
+      if ((detalle.cantidadRecibida ?? 0) > 0) {
+        throw new Error(`El ítem "${detalle.descripcion}" ya fue recepcionado.`);
+      }
+
+      const fechaItem = item.fechaRecepcion
+        ? new Date(item.fechaRecepcion)
+        : payload.fechaRecepcion
+          ? new Date(payload.fechaRecepcion)
+          : new Date();
+
+      const descargable = item.descargableInventario === true;
+
+      if (item.detalleId) {
+        await this.repo.updateDetalleRecepcion(item.detalleId, {
+          cantidadRecibida: item.cantidad,
+          descargableInventario: descargable,
+          fechaRecepcion: fechaItem,
+        });
+      }
+
+      if (descargable && item.materialId) {
         await this.repo.adjustMaterialStock(item.materialId, item.cantidad);
         await this.repo.createMaterialMovimiento({
           materialId: item.materialId,
           tipo: 'entrada',
           cantidad: item.cantidad,
-          motivo: `Recepción de Orden de Compra ${orden.numero}`,
+          motivo: `Recepción OC ${orden.numero}${item.observacion ? ` — ${item.observacion}` : ''}`,
           userId: usuarioId,
         });
       }
     }
 
-    // Update status to received
-    return this.repo.updateOrden(id, { estado: 'recibida' });
+    const updated = await this.repo.findOrdenById(id);
+    const detalles = updated?.detalles || [];
+    const todosRecibidos = detalles.length > 0 && detalles.every((d) => (d.cantidadRecibida ?? 0) > 0);
+    const algunoRecibido = detalles.some((d) => (d.cantidadRecibida ?? 0) > 0);
+
+    const fechas = detalles
+      .map((d) => d.fechaRecepcion)
+      .filter((f): f is Date => !!f)
+      .map((f) => new Date(f).getTime());
+    const ultimaFecha = fechas.length ? new Date(Math.max(...fechas)) : new Date();
+
+    const nuevoEstado = todosRecibidos
+      ? 'recibida'
+      : algunoRecibido
+        ? 'parcialmente_recibida'
+        : orden.estado;
+
+    return this.repo.updateOrden(id, {
+      estado: nuevoEstado,
+      fechaRecepcion: algunoRecibido ? ultimaFecha : undefined,
+      notasRecepcion: payload.notasRecepcion ?? updated?.notasRecepcion ?? undefined,
+      recibidoPorId: usuarioId,
+    });
   }
 }

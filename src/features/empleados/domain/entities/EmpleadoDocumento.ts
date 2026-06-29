@@ -6,6 +6,7 @@ export const EMPLEADO_DOCUMENTO_TIPOS = [
   'certificado',
   'antecedentes',
   'curriculum',
+  'planilla_luz',
   'otro',
 ] as const;
 

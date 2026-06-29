@@ -46,28 +46,30 @@ async function main() {
   }
 
   // 2. Sembrar Roles
-  console.log('Sembrando roles...');
-  const adminRole = await prisma.role.upsert({
-    where: { name: 'Administrador' },
-    update: { description: 'Control Total del Sistema' },
-    create: { name: 'Administrador', description: 'Control Total del Sistema' },
+  console.log('Limpiando y sembrando roles...');
+  // Limpiar relaciones previas para evitar conflictos de foreign key
+  await prisma.user.updateMany({ data: { roleId: null, rol: 'visor' } });
+  await prisma.rolePermission.deleteMany({});
+  await prisma.role.deleteMany({});
+
+  const adminRole = await prisma.role.create({
+    data: { name: 'Administrador', description: 'Control Total del Sistema' },
   });
 
-  const clientServiceRole = await prisma.role.upsert({
-    where: { name: 'Servicio al Cliente' },
-    update: { description: 'Gestión operativa de cobros y pedidos' },
-    create: { name: 'Servicio al Cliente', description: 'Gestión operativa de cobros y pedidos' },
+  const ventasDisenadorRole = await prisma.role.create({
+    data: { name: 'Ventas / Diseñador', description: 'Gestión de ventas, diseño de proyectos, clientes y caja' },
   });
 
-  const userRole = await prisma.role.upsert({
-    where: { name: 'User' },
-    update: { description: 'Acceso básico de consulta' },
-    create: { name: 'User', description: 'Acceso básico de consulta' },
+  const impresionRole = await prisma.role.create({
+    data: { name: 'Impresión', description: 'Módulo de impresión, cola de impresión e inventario' },
+  });
+
+  const tallerRole = await prisma.role.create({
+    data: { name: 'Taller', description: 'Gestión de taller, instalaciones y compras' },
   });
 
   // 3. Relacionar Roles con Permisos
   console.log('Vinculando permisos a roles...');
-  await prisma.rolePermission.deleteMany({});
 
   // Administrador: Todos los permisos
   for (const perm of dbPermissions) {
@@ -76,56 +78,201 @@ async function main() {
     });
   }
 
-  // Servicio al Cliente
-  const scKeys = [
-    'pedidos', 'recepcion_pedidos', 'entregas_pedidos', 'clientes', 'abonos',
-    'inventario', 'marcas', 'catalogos_logistica', 'control_caja',
-    'analisis_cartera', 'registro_llamadas', 'fidelizacion_clientes', 'cambios_devoluciones',
-    'configuracion_sistema',
+  // Impresión: módulo de impresión, cola de impresión e inventario
+  const impresionKeys = ['inventario', 'pedidos'];
+  for (const perm of dbPermissions.filter(p => impresionKeys.includes(p.key))) {
+    await prisma.rolePermission.create({
+      data: { roleId: impresionRole.id, permissionId: perm.id },
+    });
+  }
+
+  // Ventas / Diseñador: clientes, abonos, caja
+  const ventasDisenadorKeys = ['clientes', 'abonos', 'control_caja'];
+  for (const perm of dbPermissions.filter(p => ventasDisenadorKeys.includes(p.key))) {
+    await prisma.rolePermission.create({
+      data: { roleId: ventasDisenadorRole.id, permissionId: perm.id },
+    });
+  }
+
+  // Taller: inventario y pedidos
+  const tallerKeys = ['inventario', 'pedidos'];
+  for (const perm of dbPermissions.filter(p => tallerKeys.includes(p.key))) {
+    await prisma.rolePermission.create({
+      data: { roleId: tallerRole.id, permissionId: perm.id },
+    });
+  }
+
+  // 4. Sembrar Empleados y Usuarios
+  console.log('Sembrando colaboradores (empleados)...');
+  const empleadosData = [
+    {
+      id: 'EMP-001',
+      nombre: 'Andrés Israel',
+      cedula: '0999999991',
+      cargo: 'Administrador Principal',
+      departamento: 'Administración',
+      correo: 'admin@luxes.com',
+    },
+    {
+      id: 'EMP-002',
+      nombre: 'María Fernanda Torres',
+      cedula: '0999999992',
+      cargo: 'Servicio al Cliente',
+      departamento: 'Operaciones',
+      correo: 'maria.torres@luxes.com',
+    },
+    {
+      id: 'EMP-003',
+      nombre: 'Impresor Principal',
+      cedula: '0999999993',
+      cargo: 'Impresor',
+      departamento: 'Producción',
+      correo: 'impresion@luxes.com',
+    },
+    {
+      id: 'EMP-004',
+      nombre: 'Andrés Israel',
+      cedula: '0999999994',
+      cargo: 'Vendedor Principal',
+      departamento: 'Ventas',
+      correo: 'ventas@luxes.com',
+    },
+    {
+      id: 'EMP-005',
+      nombre: 'Diseñador Creativo',
+      cedula: '0999999995',
+      cargo: 'Diseñador',
+      departamento: 'Diseño',
+      correo: 'disenador@luxes.com',
+    },
+    {
+      id: 'EMP-006',
+      nombre: 'Usuario Multirol',
+      cedula: '0999999996',
+      cargo: 'Administrador Auxiliar',
+      departamento: 'Administración',
+      correo: 'multirol@luxes.com',
+    },
+    {
+      id: 'EMP-TALLER-001',
+      nombre: 'Taller Técnico',
+      cedula: '0999999997',
+      cargo: 'Técnico de Taller',
+      departamento: 'Taller',
+      correo: 'taller@luxes.com',
+    },
   ];
-  for (const perm of dbPermissions.filter(p => scKeys.includes(p.key))) {
-    await prisma.rolePermission.create({
-      data: { roleId: clientServiceRole.id, permissionId: perm.id },
+
+  for (const emp of empleadosData) {
+    await prisma.empleado.upsert({
+      where: { id: emp.id },
+      update: {
+        nombre: emp.nombre,
+        cedula: emp.cedula,
+        cargo: emp.cargo,
+        departamento: emp.departamento,
+        correo: emp.correo,
+      },
+      create: {
+        ...emp,
+        passwordHash: defaultPasswordHash,
+      },
     });
   }
 
-  // User: solo módulos básicos
-  const userKeys = ['dashboard', 'pedidos', 'recepcion_pedidos', 'entregas_pedidos', 'clientes', 'control_caja'];
-  for (const perm of dbPermissions.filter(p => userKeys.includes(p.key))) {
-    await prisma.rolePermission.create({
-      data: { roleId: userRole.id, permissionId: perm.id },
-    });
-  }
-
-  // 4. Sembrar Usuarios
   console.log('Sembrando usuarios...');
   const usersData = [
     {
       id: 'USR-001',
-      nombre: 'Admin Principal',
+      nombre: 'Andrés Israel',
       email: 'admin@luxes.com',
       username: 'admin',
-      rol: 'admin',
+      rol: 'Administrador',
       roleId: adminRole.id,
       estado: 'activo',
       fechaCreacion: new Date('2025-01-15T00:00:00Z'),
+      empleadoId: 'EMP-001',
     },
     {
       id: 'USR-002',
       nombre: 'María Fernanda Torres',
       email: 'maria.torres@luxes.com',
       username: 'maria.torres',
-      rol: 'editor',
-      roleId: clientServiceRole.id,
+      rol: 'Ventas / Diseñador',
+      roleId: ventasDisenadorRole.id,
       estado: 'activo',
       fechaCreacion: new Date('2025-02-20T00:00:00Z'),
+      empleadoId: 'EMP-002',
+    },
+    {
+      id: 'USR-003',
+      nombre: 'Impresor Principal',
+      email: 'impresion@luxes.com',
+      username: 'impresion',
+      rol: 'Impresión',
+      roleId: impresionRole.id,
+      estado: 'activo',
+      fechaCreacion: new Date('2025-06-18T00:00:00Z'),
+      empleadoId: 'EMP-003',
+    },
+    {
+      id: 'USR-004',
+      nombre: 'Andrés Israel',
+      email: 'ventas@luxes.com',
+      username: 'ventas',
+      rol: 'Ventas / Diseñador',
+      roleId: ventasDisenadorRole.id,
+      estado: 'activo',
+      fechaCreacion: new Date('2025-06-18T00:00:00Z'),
+      empleadoId: 'EMP-004',
+    },
+    {
+      id: 'USR-005',
+      nombre: 'Diseñador Creativo',
+      email: 'disenador@luxes.com',
+      username: 'disenador',
+      rol: 'Ventas / Diseñador',
+      roleId: ventasDisenadorRole.id,
+      estado: 'activo',
+      fechaCreacion: new Date('2025-06-18T00:00:00Z'),
+      empleadoId: 'EMP-005',
+    },
+    {
+      id: 'USR-006',
+      nombre: 'Usuario Multirol',
+      email: 'multirol@luxes.com',
+      username: 'multirol',
+      rol: 'Administrador',
+      roleId: adminRole.id,
+      estado: 'activo',
+      fechaCreacion: new Date('2025-06-18T00:00:00Z'),
+      empleadoId: 'EMP-006',
+    },
+    {
+      id: 'USR-TALLER-001',
+      nombre: 'Taller Técnico',
+      email: 'taller@luxes.com',
+      username: 'taller',
+      rol: 'Taller',
+      roleId: tallerRole.id,
+      estado: 'activo',
+      fechaCreacion: new Date('2025-06-18T00:00:00Z'),
+      empleadoId: 'EMP-TALLER-001',
     },
   ];
 
   for (const user of usersData) {
     await prisma.user.upsert({
-      where: { email: user.email },
-      update: { roleId: user.roleId, rol: user.rol },
+      where: { id: user.id },
+      update: { 
+        roleId: user.roleId, 
+        rol: user.rol, 
+        email: user.email, 
+        nombre: user.nombre, 
+        username: user.username,
+        passwordHash: defaultPasswordHash,
+        empleadoId: user.empleadoId
+      },
       create: { ...user, passwordHash: defaultPasswordHash },
     });
   }
@@ -147,7 +294,7 @@ async function main() {
     {
       fecha: new Date('2026-06-03T09:20:00Z'),
       userId: 'USR-001',
-      usuarioNom: 'Admin Principal',
+      usuarioNom: 'Andrés Israel',
       accion: 'Crear material',
       modulo: 'Inventario',
       detalle: 'Agregó material: Vinilo autoadhesivo brillante (consumible).',
@@ -156,7 +303,7 @@ async function main() {
     {
       fecha: new Date('2026-06-02T14:30:00Z'),
       userId: 'USR-001',
-      usuarioNom: 'Admin Principal',
+      usuarioNom: 'Andrés Israel',
       accion: 'Desactivar usuario',
       modulo: 'Usuarios y Roles',
       detalle: 'Desactivó usuario: lucia.fernandez.',
@@ -176,10 +323,17 @@ async function main() {
   await prisma.unidadMedida.deleteMany({});
 
   console.log('Sembrando unidades de medida...');
-  const unidades = ['metros', 'litros', 'rollos', 'hojas', 'planchas', 'unidades'];
-  for (const nombre of unidades) {
+  const unidadesMap = [
+    { nombre: 'metros', abreviacion: 'm' },
+    { nombre: 'litros', abreviacion: 'L' },
+    { nombre: 'rollos', abreviacion: 'rollos' },
+    { nombre: 'hojas', abreviacion: 'hojas' },
+    { nombre: 'planchas', abreviacion: 'planchas' },
+    { nombre: 'unidades', abreviacion: 'unid' },
+  ];
+  for (const item of unidadesMap) {
     await prisma.unidadMedida.create({
-      data: { nombre, abreviacion: nombre.slice(0, 3) }
+      data: item
     });
   }
 
@@ -196,12 +350,49 @@ async function main() {
 
   // Insertar Consumibles iniciales
   const materialesData = [
-    { nombre: 'Vinilo autoadhesivo brillante',   tipo: 'consumible',  unidadMedida: 'metros',   stockActual: 150, stockMinimo: 20,  precioCosto: 3.5, categoria: 'Taller', estadoUso: 'BODEGA'  },
-    { nombre: 'Vinilo esmerilado para vidrio',   tipo: 'consumible',  unidadMedida: 'metros',   stockActual: 80,  stockMinimo: 15,  precioCosto: 4.2, categoria: 'Taller', estadoUso: 'BODEGA'  },
-    { nombre: 'Lona banner 440g',                tipo: 'consumible',  unidadMedida: 'metros',   stockActual: 200, stockMinimo: 30,  precioCosto: 2.8, categoria: 'Taller', estadoUso: 'BODEGA'  },
-    { nombre: 'Tinta solvente Magenta',          tipo: 'consumible',  unidadMedida: 'litros',   stockActual: 12,  stockMinimo: 3,   precioCosto: 28.0, categoria: 'Taller', estadoUso: 'BODEGA' },
-    { nombre: 'Tinta solvente Cian',             tipo: 'consumible',  unidadMedida: 'litros',   stockActual: 10,  stockMinimo: 3,   precioCosto: 28.0, categoria: 'Taller', estadoUso: 'BODEGA' },
-    { nombre: 'Tinta solvente Negra',            tipo: 'consumible',  unidadMedida: 'litros',   stockActual: 15,  stockMinimo: 3,   precioCosto: 25.0, categoria: 'Taller', estadoUso: 'BODEGA' },
+    // Lona traslúcida
+    { nombre: 'Lona traslúcida - 1.5m', tipo: 'consumible', unidadMedida: 'metros', stockActual: 120, stockMinimo: 20, precioCosto: 4.5, categoria: 'Impresión', estadoUso: 'BODEGA', codigo: 'LOTR-1.5', ancho: 1.5 },
+    { nombre: 'Lona traslúcida - 2.2m', tipo: 'consumible', unidadMedida: 'metros', stockActual: 80, stockMinimo: 15, precioCosto: 5.5, categoria: 'Impresión', estadoUso: 'BODEGA', codigo: 'LOTR-2.2', ancho: 2.2 },
+
+    // Lona brillo
+    { nombre: 'Lona brillo - 1.5m', tipo: 'consumible', unidadMedida: 'metros', stockActual: 200, stockMinimo: 30, precioCosto: 3.0, categoria: 'Impresión', estadoUso: 'BODEGA', codigo: 'LOBR-1.5', ancho: 1.5 },
+    { nombre: 'Lona brillo - 2.2m', tipo: 'consumible', unidadMedida: 'metros', stockActual: 150, stockMinimo: 20, precioCosto: 4.0, categoria: 'Impresión', estadoUso: 'BODEGA', codigo: 'LOBR-2.2', ancho: 2.2 },
+    { nombre: 'Lona brillo - 3.2m', tipo: 'consumible', unidadMedida: 'metros', stockActual: 100, stockMinimo: 10, precioCosto: 5.8, categoria: 'Impresión', estadoUso: 'BODEGA', codigo: 'LOBR-3.2', ancho: 3.2 },
+
+    // Lona mate
+    { nombre: 'Lona mate - 1.5m', tipo: 'consumible', unidadMedida: 'metros', stockActual: 140, stockMinimo: 20, precioCosto: 3.2, categoria: 'Impresión', estadoUso: 'BODEGA', codigo: 'LOMT-1.5', ancho: 1.5 },
+    { nombre: 'Lona mate - 2.2m', tipo: 'consumible', unidadMedida: 'metros', stockActual: 90, stockMinimo: 15, precioCosto: 4.2, categoria: 'Impresión', estadoUso: 'BODEGA', codigo: 'LOMT-2.2', ancho: 2.2 },
+
+    // Vinil brillo
+    { nombre: 'Vinil brillo - 1.2m', tipo: 'consumible', unidadMedida: 'metros', stockActual: 180, stockMinimo: 30, precioCosto: 2.5, categoria: 'Impresión', estadoUso: 'BODEGA', codigo: 'VNBR-1.2', ancho: 1.2 },
+    { nombre: 'Vinil brillo - 1.5m', tipo: 'consumible', unidadMedida: 'metros', stockActual: 130, stockMinimo: 20, precioCosto: 3.2, categoria: 'Impresión', estadoUso: 'BODEGA', codigo: 'VNBR-1.5', ancho: 1.5 },
+
+    // Vinil mate
+    { nombre: 'Vinil mate - 1.2m', tipo: 'consumible', unidadMedida: 'metros', stockActual: 160, stockMinimo: 25, precioCosto: 2.7, categoria: 'Impresión', estadoUso: 'BODEGA', codigo: 'VNMT-1.2', ancho: 1.2 },
+    { nombre: 'Vinil mate - 1.5m', tipo: 'consumible', unidadMedida: 'metros', stockActual: 110, stockMinimo: 15, precioCosto: 3.4, categoria: 'Impresión', estadoUso: 'BODEGA', codigo: 'VNMT-1.5', ancho: 1.5 },
+
+    // Vinil laminación brillo
+    { nombre: 'Vinil laminación brillo - 1.2m', tipo: 'consumible', unidadMedida: 'metros', stockActual: 100, stockMinimo: 15, precioCosto: 1.8, categoria: 'Impresión', estadoUso: 'BODEGA', codigo: 'VMLB-1.2', ancho: 1.2 },
+    { nombre: 'Vinil laminación brillo - 1.5m', tipo: 'consumible', unidadMedida: 'metros', stockActual: 90, stockMinimo: 15, precioCosto: 2.2, categoria: 'Impresión', estadoUso: 'BODEGA', codigo: 'VMLB-1.5', ancho: 1.5 },
+
+    // Vinil laminación mate
+    { nombre: 'Vinil laminación mate - 1.2m', tipo: 'consumible', unidadMedida: 'metros', stockActual: 95, stockMinimo: 15, precioCosto: 1.9, categoria: 'Impresión', estadoUso: 'BODEGA', codigo: 'VMLM-1.2', ancho: 1.2 },
+    { nombre: 'Vinil laminación mate - 1.5m', tipo: 'consumible', unidadMedida: 'metros', stockActual: 85, stockMinimo: 15, precioCosto: 2.3, categoria: 'Impresión', estadoUso: 'BODEGA', codigo: 'VMLM-1.5', ancho: 1.5 },
+
+    // Tela sintética
+    { nombre: 'Tela sintética - 1.6m', tipo: 'consumible', unidadMedida: 'metros', stockActual: 70, stockMinimo: 10, precioCosto: 6.0, categoria: 'Impresión', estadoUso: 'BODEGA', codigo: 'TLSN-1.6', ancho: 1.6 },
+
+    // PVC (by planchas / units)
+    { nombre: 'PVC - 3mm', tipo: 'consumible', unidadMedida: 'planchas', stockActual: 40, stockMinimo: 5, precioCosto: 15.0, categoria: 'Impresión', estadoUso: 'BODEGA', codigo: 'PVC-3MM', ancho: null },
+    { nombre: 'PVC - 5mm', tipo: 'consumible', unidadMedida: 'planchas', stockActual: 25, stockMinimo: 5, precioCosto: 22.0, categoria: 'Impresión', estadoUso: 'BODEGA', codigo: 'PVC-5MM', ancho: null },
+
+    // Tintas
+    { nombre: 'Tinta solvente Magenta', tipo: 'consumible', unidadMedida: 'litros', stockActual: 12, stockMinimo: 3, precioCosto: 28.0, categoria: 'Impresión', estadoUso: 'BODEGA', codigo: 'INK-MAG', ancho: null },
+    { nombre: 'Tinta solvente Cian', tipo: 'consumible', unidadMedida: 'litros', stockActual: 10, stockMinimo: 3, precioCosto: 28.0, categoria: 'Impresión', estadoUso: 'BODEGA', codigo: 'INK-CYN', ancho: null },
+    { nombre: 'Tinta solvente Amarilla', tipo: 'consumible', unidadMedida: 'litros', stockActual: 11, stockMinimo: 3, precioCosto: 28.0, categoria: 'Impresión', estadoUso: 'BODEGA', codigo: 'INK-YEL', ancho: null },
+    { nombre: 'Tinta solvente Negra', tipo: 'consumible', unidadMedida: 'litros', stockActual: 15, stockMinimo: 3, precioCosto: 25.0, categoria: 'Impresión', estadoUso: 'BODEGA', codigo: 'INK-BLK', ancho: null },
+
+    // Taller/Otros
     { nombre: 'Cinta doble faz 2cm',             tipo: 'consumible',  unidadMedida: 'rollos',   stockActual: 40,  stockMinimo: 10,  precioCosto: 1.8, categoria: 'Taller', estadoUso: 'BODEGA'  },
     { nombre: 'Papel transfer para sublimación', tipo: 'consumible',  unidadMedida: 'hojas',    stockActual: 500, stockMinimo: 100, precioCosto: 0.15, categoria: 'Taller', estadoUso: 'BODEGA' },
     { nombre: 'Acrílico transparente 3mm',       tipo: 'consumible',  unidadMedida: 'planchas', stockActual: 25,  stockMinimo: 5,   precioCosto: 18.0, categoria: 'Taller', estadoUso: 'BODEGA' },
@@ -364,30 +555,138 @@ async function main() {
   }
 
   console.log('Sembrando proveedores y métodos de pago...');
-  await prisma.abonoCompra.deleteMany({});
-  await prisma.cuentaPorPagar.deleteMany({});
-  await prisma.detalleCompra.deleteMany({});
-  await prisma.ordenCompra.deleteMany({});
-  await prisma.proveedor.deleteMany({});
-  await prisma.metodoPago.deleteMany({});
 
   const proveedores = [
     { nombre: 'Distribuidora de Vinilos S.A.', ruc: '0991728394001', direccion: 'Av. Juan Tanca Marengo', telefono: '0999999999', email: 'ventas@vinilos.com', contacto: 'Juan Pérez' },
     { nombre: 'Aceros del Pacífico', ruc: '1792837492001', direccion: 'Vía a Daule Km 12', telefono: '0988888888', email: 'info@acerospacifico.com', contacto: 'María Gómez' },
     { nombre: 'Suministros Gráficos Express', ruc: '0983748293001', direccion: 'Centro de Guayaquil', telefono: '0977777777', email: 'express@graficos.com', contacto: 'Carlos Ruiz' }
   ];
+  
+  const dbProveedores = [];
   for (const prov of proveedores) {
-    await prisma.proveedor.create({ data: prov });
+    const dbProv = await prisma.proveedor.upsert({
+      where: { ruc: prov.ruc },
+      update: {
+        nombre: prov.nombre,
+        direccion: prov.direccion,
+        telefono: prov.telefono,
+        email: prov.email,
+        contacto: prov.contacto
+      },
+      create: prov
+    });
+    dbProveedores.push(dbProv);
   }
 
   const metodosPago = [
-    { nombre: 'Caja Chica', descripcion: 'Efectivo para compras menores' },
-    { nombre: 'Caja General', descripcion: 'Efectivo de la caja principal' },
-    { nombre: 'Banco (Transferencia)', descripcion: 'Transferencia bancaria directa' },
-    { nombre: 'Banco (Cheque)', descripcion: 'Cheque emitido por la empresa' }
+    { nombre: 'Caja Chica', descripcion: 'Efectivo para compras menores', tipo: 'EFECTIVO' },
+    { nombre: 'Caja General', descripcion: 'Efectivo de la caja principal', tipo: 'EFECTIVO' },
+    { nombre: 'Banco (Transferencia)', descripcion: 'Transferencia bancaria directa', tipo: 'BANCO' },
+    { nombre: 'Banco (Cheque)', descripcion: 'Cheque emitido por la empresa', tipo: 'BANCO' }
   ];
+  
+  const dbMetodosPago = [];
   for (const mp of metodosPago) {
-    await prisma.metodoPago.create({ data: mp });
+    const dbMp = await prisma.metodoPago.upsert({
+      where: { nombre: mp.nombre },
+      update: { descripcion: mp.descripcion, tipo: mp.tipo },
+      create: mp,
+    });
+    dbMetodosPago.push(dbMp);
+  }
+
+  // Sanitizar proformas históricas para actualizar "Admin Principal" y "Vendedor Principal" a "Andrés Israel"
+  console.log('Sanitizando proformas históricas...');
+  await prisma.proforma.updateMany({
+    where: { atiende: 'Admin Principal' },
+    data: { atiende: 'Andrés Israel' }
+  });
+  await prisma.proforma.updateMany({
+    where: { atiende: 'Vendedor Principal' },
+    data: { atiende: 'Andrés Israel' }
+  });
+
+  // Sembrar datos de prueba para Egresos (Orden de Compra y AbonoCompra)
+  console.log('Sembrando egresos de prueba...');
+  const provVinilos = dbProveedores.find(p => p.ruc === '0991728394001');
+  const metodoBanco = dbMetodosPago.find(m => m.nombre === 'Banco (Transferencia)');
+  const adminUser = await prisma.user.findFirst({ where: { username: 'admin' } });
+
+  if (provVinilos && metodoBanco && adminUser) {
+    // 1. Upsert Orden Compra de prueba
+    const ocId = 'OC-SEED-001';
+    await prisma.ordenCompra.upsert({
+      where: { numero: 'OC-2026-0001' },
+      update: {
+        proveedorId: provVinilos.id,
+        usuarioId: adminUser.id,
+        subtotal: 100,
+        impuesto: 12,
+        total: 112,
+        estado: 'aprobada',
+        estadoPago: 'pagado',
+        concepto: 'Compra de vinilo e insumos gráficos de prueba',
+      },
+      create: {
+        id: ocId,
+        numero: 'OC-2026-0001',
+        proveedorId: provVinilos.id,
+        usuarioId: adminUser.id,
+        fecha: new Date(),
+        subtotal: 100,
+        impuesto: 12,
+        total: 112,
+        estado: 'aprobada',
+        estadoPago: 'pagado',
+        concepto: 'Compra de vinilo e insumos gráficos de prueba',
+        aprobadoPorId: adminUser.id,
+        fechaAprobacion: new Date()
+      }
+    });
+
+    // 2. Upsert Abono Compra de prueba
+    const abonoId = 'ABONO-SEED-001';
+    await prisma.abonoCompra.upsert({
+      where: { id: abonoId },
+      update: {
+        ordenCompraId: ocId,
+        metodoPagoId: metodoBanco.id,
+        monto: 112,
+        referencia: 'TRANSF-982173'
+      },
+      create: {
+        id: abonoId,
+        ordenCompraId: ocId,
+        metodoPagoId: metodoBanco.id,
+        monto: 112,
+        fecha: new Date(),
+        referencia: 'TRANSF-982173'
+      }
+    });
+  }
+
+  // Sembrar Gasto de prueba
+  if (metodoBanco) {
+    const gastoId = 'GASTO-SEED-001';
+    await prisma.gasto.upsert({
+      where: { id: gastoId },
+      update: {
+        concepto: 'Pago de internet y telefonía oficina de prueba',
+        categoria: 'servicios',
+        monto: 45.00,
+        proveedor: 'Netlife S.A.',
+        metodoPagoId: metodoBanco.id
+      },
+      create: {
+        id: gastoId,
+        concepto: 'Pago de internet y telefonía oficina de prueba',
+        categoria: 'servicios',
+        fecha: new Date(),
+        monto: 45.00,
+        proveedor: 'Netlife S.A.',
+        metodoPagoId: metodoBanco.id
+      }
+    });
   }
 
   // 8. Sembrar Colaboradores y Asistencias

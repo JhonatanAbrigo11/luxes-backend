@@ -1,11 +1,9 @@
-import { ClientesService } from '../../application/services/ClientesService.js';
-import { createClientesController } from '../adapters/http/clientesController.js';
+import { ClientesController } from '../adapters/http/clientesController.js';
 import { createClientesRoutes } from '../routes/clientesRoutes.js';
+import type { Router } from 'express';
 
-export async function createClientesModule() {
-  const clientesService = new ClientesService();
-  const clientesController = createClientesController(clientesService);
-  const clientesRoutes = createClientesRoutes(clientesController);
-
-  return { clientesRoutes, clientesService };
+export async function createClientesModule(): Promise<{ clientesRoutes: Router }> {
+  const controller = new ClientesController();
+  const clientesRoutes = createClientesRoutes(controller);
+  return { clientesRoutes };
 }

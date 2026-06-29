@@ -1,11 +1,19 @@
-import { GastosService } from '../../application/services/GastosService.js';
-import { createGastosController } from '../adapters/http/gastosController.js';
+import { GastosController } from '../adapters/http/gastosController.js';
+import { VehiculosController } from '../adapters/http/vehiculosController.js';
 import { createGastosRoutes } from '../routes/gastosRoutes.js';
+import type { Router } from 'express';
 
-export async function createGastosModule() {
-  const gastosService = new GastosService();
-  const gastosController = createGastosController(gastosService);
-  const gastosRoutes = createGastosRoutes(gastosController);
+export async function createGastosModule(): Promise<{
+  gastosRouter: Router;
+  vehiculosRouter: Router;
+}> {
+  const gastosController = new GastosController();
+  const vehiculosController = new VehiculosController();
+  
+  const { gastosRouter, vehiculosRouter } = createGastosRoutes(
+    gastosController,
+    vehiculosController
+  );
 
-  return { gastosRoutes, gastosService };
+  return { gastosRouter, vehiculosRouter };
 }

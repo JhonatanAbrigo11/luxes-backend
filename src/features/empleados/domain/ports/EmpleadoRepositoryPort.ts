@@ -7,14 +7,21 @@ export type EmpleadoInput = {
   departamento?: string;
   telefono?: string;
   correo?: string;
+  username?: string;
   contraseña?: string;
   passwordHash?: string;
   cuentaBanco?: string;
   banco?: string;
   tipoContrato?: string;
+  tieneContrato?: boolean;
+  region?: string;
+  decimoTerceroMensualizado?: boolean;
+  decimoCuartoMensualizado?: boolean;
   sueldoDiario?: number;
   direccion?: string;
   foto?: string | null;
+  rol?: string;
+  roleId?: string;
 };
 
 export abstract class EmpleadoRepositoryPort {

@@ -13,10 +13,40 @@ export class PrismaMaterialAdapter implements MaterialRepositoryPort {
 
   private mapRow(row: any): MaterialData {
     if (!row) return null as any;
-    const { unidadMedida, ...rest } = row;
+    const { unidadMedida, detallesCompra, ...rest } = row;
+
+    const purchases = detallesCompra || [];
+    const approvedPurchases = purchases.filter((d: any) => 
+      d.ordenCompra && (d.ordenCompra.estado === 'APROBADA' || d.ordenCompra.estado === 'RECIBIDA')
+    );
+
+    let cpp = row.precioCosto || 0;
+    let ultimaFechaCompra: string | null = null;
+    if (approvedPurchases.length > 0) {
+      const totalCost = approvedPurchases.reduce((sum: number, d: any) => sum + (d.cantidad * d.precioUnitario), 0);
+      const totalQty = approvedPurchases.reduce((sum: number, d: any) => sum + d.cantidad, 0);
+      if (totalQty > 0) {
+        cpp = totalCost / totalQty;
+      }
+
+      const fechasCompra = approvedPurchases
+        .map((d: any) => d.ordenCompra?.fechaRecepcion || d.ordenCompra?.fecha)
+        .filter(Boolean)
+        .map((f: Date) => new Date(f).getTime());
+      if (fechasCompra.length > 0) {
+        ultimaFechaCompra = new Date(Math.max(...fechasCompra)).toISOString().split('T')[0];
+      }
+    }
+
     return {
       ...rest,
-      unidadMedida: row.unidadMedida?.nombre || 'unidades',
+      costoPromedioPonderado: cpp,
+      ultimaFechaCompra,
+      unidadMedida: row.unidadMedida ? {
+        id: row.unidadMedida.id,
+        nombre: row.unidadMedida.nombre,
+        abreviacion: row.unidadMedida.abreviacion
+      } : { nombre: 'unidades', abreviacion: 'unid' },
     } as unknown as MaterialData;
   }
 
@@ -50,7 +80,10 @@ export class PrismaMaterialAdapter implements MaterialRepositoryPort {
       const [rows, total] = await Promise.all([
         this.prisma.material.findMany({
           where,
-          include: { unidadMedida: true },
+          include: { 
+            unidadMedida: true,
+            detallesCompra: { include: { ordenCompra: true } }
+          },
           orderBy: [{ tipo: 'asc' }, { nombre: 'asc' }],
           skip,
           take: limit,
@@ -64,7 +97,10 @@ export class PrismaMaterialAdapter implements MaterialRepositoryPort {
     } else {
       const rows = await this.prisma.material.findMany({
         where,
-        include: { unidadMedida: true },
+        include: { 
+          unidadMedida: true,
+          detallesCompra: { include: { ordenCompra: true } }
+        },
         orderBy: [{ tipo: 'asc' }, { nombre: 'asc' }],
       });
       return rows.map(r => this.mapRow(r));
@@ -74,7 +110,10 @@ export class PrismaMaterialAdapter implements MaterialRepositoryPort {
   async findById(id: string): Promise<MaterialData | null> {
     const row = await this.prisma.material.findUnique({
       where: { id },
-      include: { unidadMedida: true },
+      include: { 
+        unidadMedida: true,
+        detallesCompra: { include: { ordenCompra: true } }
+      },
     });
     return this.mapRow(row);
   }
@@ -83,11 +122,12 @@ export class PrismaMaterialAdapter implements MaterialRepositoryPort {
     const { unidadMedida, ...rest } = data as any;
 
     let unidadMedidaId = (data as any).unidadMedidaId;
-    if (!unidadMedidaId && unidadMedida) {
+    const unitName = typeof unidadMedida === 'string' ? unidadMedida : unidadMedida?.nombre;
+    if (!unidadMedidaId && unitName) {
       const unit = await this.prisma.unidadMedida.upsert({
-        where: { nombre: unidadMedida },
+        where: { nombre: unitName },
         update: {},
-        create: { nombre: unidadMedida }
+        create: { nombre: unitName }
       });
       unidadMedidaId = unit.id;
     }
@@ -106,11 +146,12 @@ export class PrismaMaterialAdapter implements MaterialRepositoryPort {
     const { unidadMedida, ...rest } = data as any;
 
     let unidadMedidaId = (data as any).unidadMedidaId;
-    if (!unidadMedidaId && unidadMedida) {
+    const unitName = typeof unidadMedida === 'string' ? unidadMedida : unidadMedida?.nombre;
+    if (!unidadMedidaId && unitName) {
       const unit = await this.prisma.unidadMedida.upsert({
-        where: { nombre: unidadMedida },
+        where: { nombre: unitName },
         update: {},
-        create: { nombre: unidadMedida }
+        create: { nombre: unitName }
       });
       unidadMedidaId = unit.id;
     }
@@ -172,13 +213,14 @@ export class PrismaMaterialAdapter implements MaterialRepositoryPort {
     return rows as unknown as MovimientoData[];
   }
 
-  async createMovimiento(data: Omit<MovimientoData, 'id' | 'fecha'>): Promise<MovimientoData> {
+  async createMovimiento(data: Omit<MovimientoData, 'id' | 'fecha'> & { fecha?: Date }): Promise<MovimientoData> {
     const row = await this.prisma.movimientoInventario.create({
       data: {
         tipo: data.tipo,
         cantidad: data.cantidad,
         motivo: data.motivo,
         userId: data.userId,
+        ...(data.fecha ? { fecha: data.fecha } : {}),
         material: { connect: { id: data.materialId } },
       },
     });
@@ -216,6 +258,9 @@ export class PrismaMaterialAdapter implements MaterialRepositoryPort {
         cantidad: data.cantidad,
         comentarios: data.comentarios,
         estado: data.estado ?? 'prestado',
+        fechaDevolucionEsperada: (data as any).fechaDevolucionEsperada
+          ? new Date((data as any).fechaDevolucionEsperada)
+          : null,
         material: { connect: { id: data.materialId } },
         responsable: { connect: { id: data.responsableId } },
       },
@@ -227,10 +272,16 @@ export class PrismaMaterialAdapter implements MaterialRepositoryPort {
     return row as unknown as PrestamoData;
   }
 
-  async returnPrestamo(id: string, fechaRetorno: Date): Promise<PrestamoData> {
+  async returnPrestamo(id: string, fechaRetorno: Date, observacionDevolucion?: string | null): Promise<PrestamoData> {
     const row = await this.prisma.prestamo.update({
       where: { id },
-      data: { fechaRetorno, estado: 'devuelto' },
+      data: {
+        fechaRetorno,
+        estado: 'devuelto',
+        ...(observacionDevolucion != null && observacionDevolucion !== ''
+          ? { observacionDevolucion }
+          : {}),
+      },
       include: {
         material: { select: { nombre: true, tipo: true, unidadMedida: true } },
         responsable: { select: { nombre: true, username: true } },
@@ -239,12 +290,126 @@ export class PrismaMaterialAdapter implements MaterialRepositoryPort {
     return row as unknown as PrestamoData;
   }
 
-  // ── Stock ───────────────────────────────────────────────────────────────────
-
   async adjustStock(materialId: string, delta: number): Promise<void> {
     await this.prisma.material.update({
       where: { id: materialId },
       data: { stockActual: { increment: delta } },
     });
+  }
+
+  async getMaterialHistorial(idOrCodigo: string): Promise<any> {
+    const material = await this.prisma.material.findFirst({
+      where: {
+        OR: [
+          { id: idOrCodigo },
+          { codigo: idOrCodigo }
+        ]
+      },
+      include: { unidadMedida: true }
+    });
+    if (!material) throw new Error('Material no encontrado.');
+    const id = material.id;
+
+    // 1. Query Compras (DetalleCompra)
+    const detallesCompra = await this.prisma.detalleCompra.findMany({
+      where: { materialId: id },
+      include: {
+        ordenCompra: {
+          include: { proveedor: true }
+        }
+      },
+      orderBy: { ordenCompra: { fecha: 'desc' } }
+    });
+
+    const compras = detallesCompra.map(d => ({
+      id: d.id,
+      ordenId: d.ordenCompraId,
+      numero: d.ordenCompra.numero,
+      fecha: d.ordenCompra.fecha ? new Date(d.ordenCompra.fecha).toISOString().split('T')[0] : '',
+      fechaRecepcion: d.fechaRecepcion ? new Date(d.fechaRecepcion).toISOString().split('T')[0] : (d.ordenCompra.fechaRecepcion ? new Date(d.ordenCompra.fechaRecepcion).toISOString().split('T')[0] : ''),
+      proveedor: d.ordenCompra.proveedor?.nombre || 'Sin proveedor',
+      cantidad: d.cantidad,
+      cantidadRecibida: d.cantidadRecibida,
+      precioUnitario: d.precioUnitario,
+      subtotal: d.subtotal,
+      estado: d.ordenCompra.estado
+    }));
+
+    // 2. Query Movimientos (MovimientoInventario)
+    const movimientosDb = await this.prisma.movimientoInventario.findMany({
+      where: { materialId: id },
+      orderBy: { fecha: 'desc' }
+    });
+
+    const movimientos = movimientosDb.map(m => ({
+      id: m.id,
+      tipo: m.tipo,
+      cantidad: m.cantidad,
+      motivo: m.motivo,
+      fecha: m.fecha ? new Date(m.fecha).toISOString() : ''
+    }));
+
+    // 3. Query Usos en Proyectos (ProyectoFase)
+    const fasesInstalacion = await this.prisma.proyectoFase.findMany({
+      where: {
+        fase: 'INSTALACION'
+      },
+      include: {
+        proyecto: true
+      }
+    });
+
+    const usos: any[] = [];
+    const matSku = material.codigo || '';
+    const matNombreLower = material.nombre.toLowerCase();
+
+    for (const fase of fasesInstalacion) {
+      if (!fase.datos) continue;
+      try {
+        const datos = JSON.parse(fase.datos);
+        const materiales = datos.materiales;
+        if (Array.isArray(materiales)) {
+          const matched = materiales.filter((m: any) => 
+            (m.sku && m.sku === matSku) || 
+            (m.nombre && m.nombre.toLowerCase() === matNombreLower)
+          );
+
+          for (const m of matched) {
+            usos.push({
+              proyectoId: fase.proyectoId,
+              proyectoNombre: fase.proyecto.nombre,
+              cliente: fase.proyecto.clienteEmpresa || fase.proyecto.clienteNombre || 'Sin cliente',
+              cantidad: m.cantidadLaveada !== undefined ? m.cantidadLaveada : (m.cantidadLlevada !== undefined ? m.cantidadLlevada : (m.cantidad || 0)),
+              unidad: m.unidad || '',
+              fecha: datos.fechaInstalacion || (fase.fechaCompletada ? new Date(fase.fechaCompletada).toISOString().split('T')[0] : ''),
+              responsable: m.responsable || datos.personalAsignado?.[0]?.nombre || 'Sin asignar',
+              observacion: m.observacion || m.observaciones || ''
+            });
+          }
+        }
+      } catch (err) {
+        console.error('Error parsing fase datos:', err);
+      }
+    }
+
+    usos.sort((a, b) => new Date(b.fecha).getTime() - new Date(a.fecha).getTime());
+
+    return {
+      material: {
+        id: material.id,
+        nombre: material.nombre,
+        codigo: material.codigo,
+        categoria: material.categoria,
+        tipo: material.tipo,
+        stockActual: material.stockActual,
+        unidadMedida: material.unidadMedida ? {
+          nombre: material.unidadMedida.nombre,
+          abreviacion: material.unidadMedida.abreviacion
+        } : { nombre: 'unidades', abreviacion: 'unid' }
+      },
+      compras,
+      usos,
+      movimientos
+    };
   }
 }

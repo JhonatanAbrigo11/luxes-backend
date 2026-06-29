@@ -17,6 +17,11 @@ export interface MetodoPagoData {
   nombre: string;
   descripcion?: string | null;
   activo: boolean;
+  tipo: string;
+  saldoActual?: number;
+  ingresosPeriod?: number;
+  egresosPeriod?: number;
+  netoPeriod?: number;
 }
 
 export interface DetalleCompraInput {
@@ -30,6 +35,9 @@ export interface DetalleCompraData extends DetalleCompraInput {
   id: string;
   ordenCompraId: string;
   subtotal: number;
+  cantidadRecibida?: number | null;
+  descargableInventario?: boolean | null;
+  fechaRecepcion?: Date | null;
 }
 
 export interface AbonoCompraData {
@@ -56,10 +64,10 @@ export interface CuentaPorPagarData {
 export interface OrdenCompraData {
   id: string;
   numero: string;
-  proveedorId: string;
+  proveedorId?: string | null;
   proveedor?: ProveedorData;
   usuarioId: string;
-  usuario?: { id: string; nombre: string; email: string };
+  usuario?: { id: string; nombre: string; email: string; rol?: string | null };
   fecha: Date;
   subtotal: number;
   impuesto: number;
@@ -71,10 +79,15 @@ export interface OrdenCompraData {
   fechaCreacion: Date;
   fechaAprobacion?: Date | null;
   aprobadoPorId?: string | null;
-  aprobadoPor?: { id: string; nombre: string; email: string } | null;
+  aprobadoPor?: { id: string; nombre: string; email: string; rol?: string | null } | null;
+  fechaRecepcion?: Date | null;
+  notasRecepcion?: string | null;
+  recibidoPorId?: string | null;
+  recibidoPor?: { id: string; nombre: string; email: string; rol?: string | null } | null;
   detalles?: DetalleCompraData[];
   abonos?: AbonoCompraData[];
   cuentaPorPagar?: CuentaPorPagarData | null;
+  proyectoId?: string | null;
 }
 
 export interface ComprasRepositoryPort {
@@ -109,13 +122,17 @@ export interface ComprasRepositoryPort {
     limit?: number;
     search?: string;
     estado?: string;
+    estados?: string[];
     estadoPago?: string;
+    creadorRol?: string;
+    creadorId?: string;
+    pendienteRecepcion?: boolean;
   }): Promise<{ items: OrdenCompraData[]; total: number }>;
 
   findOrdenById(id: string): Promise<OrdenCompraData | null>;
 
   createOrden(data: {
-    proveedorId: string;
+    proveedorId?: string;
     usuarioId: string;
     fecha?: Date;
     impuesto?: number;
@@ -123,10 +140,11 @@ export interface ComprasRepositoryPort {
     notas?: string;
     detalles: DetalleCompraInput[];
     fechaVencimiento?: Date | null;
+    proyectoId?: string | null;
   }): Promise<OrdenCompraData>;
 
   updateOrden(id: string, data: {
-    proveedorId?: string;
+    proveedorId?: string | null;
     fecha?: Date;
     impuesto?: number;
     estado?: string;
@@ -134,7 +152,20 @@ export interface ComprasRepositoryPort {
     notas?: string;
     detalles?: DetalleCompraInput[];
     aprobadoPorId?: string;
+    proyectoId?: string | null;
+    abonoMonto?: number;
+    metodoPagoId?: string;
+    abonoReferencia?: string;
+    fechaRecepcion?: Date;
+    notasRecepcion?: string;
+    recibidoPorId?: string;
   }): Promise<OrdenCompraData>;
+
+  updateDetalleRecepcion(id: string, data: {
+    cantidadRecibida: number;
+    descargableInventario: boolean;
+    fechaRecepcion?: Date;
+  }): Promise<void>;
 
   deleteOrden(id: string): Promise<void>;
 
@@ -164,9 +195,9 @@ export interface ComprasRepositoryPort {
   }): Promise<CuentaPorPagarData>;
 
   // ── Métodos de Pago ──
-  findAllMetodosPago(): Promise<MetodoPagoData[]>;
-  createMetodoPago(data: { nombre: string; descripcion?: string }): Promise<MetodoPagoData>;
-  updateMetodoPago(id: string, data: { nombre?: string; descripcion?: string; activo?: boolean }): Promise<MetodoPagoData>;
+  findAllMetodosPago(desde?: Date, hasta?: Date): Promise<MetodoPagoData[]>;
+  createMetodoPago(data: { nombre: string; descripcion?: string; tipo?: string }): Promise<MetodoPagoData>;
+  updateMetodoPago(id: string, data: { nombre?: string; descripcion?: string; activo?: boolean; tipo?: string }): Promise<MetodoPagoData>;
   deleteMetodoPago(id: string): Promise<void>;
 
   // ── Stats ──

@@ -2,6 +2,32 @@ import { User } from '../../../domain/entities/User.js';
 import { UserRepositoryPort } from '../../../domain/ports/UserRepositoryPort.js';
 import { prisma } from '../../../../../config/prismaClient.js';
 
+/** El quiosco y cuentas de sistema usan users.rol; no deben reemplazarse por RBAC genérico. */
+function resolveUserRol(dbUser: { rol: string; username: string; role?: { name: string } | null }): string {
+  const slug = (dbUser.rol || '').toLowerCase().trim();
+  const username = (dbUser.username || '').toLowerCase().trim();
+  const roleName = dbUser.role?.name?.trim() || '';
+  const roleSlug = roleName.toLowerCase();
+
+  if (slug === 'asistencia' || username === 'asistencia') return 'asistencia';
+  if (slug === 'taller' || username === 'taller') return dbUser.rol || 'Taller';
+
+  // Cuenta principal de administración
+  if (username === 'admin') {
+    if (roleSlug === 'admin' || roleSlug === 'administrador') return roleName;
+    if (slug === 'admin' || slug === 'administrador') return dbUser.rol;
+    return 'Administrador';
+  }
+
+  // Cuentas admin/asistencia/taller: users.rol manda sobre un rol RBAC secundario (ej. Visor)
+  if (slug === 'admin' || slug === 'administrador') return dbUser.rol;
+
+  // Sin slug de sistema en users.rol, pero el rol RBAC es administrador
+  if (roleSlug === 'admin' || roleSlug === 'administrador') return roleName;
+
+  return roleName || dbUser.rol;
+}
+
 /**
  * Adaptador de persistencia de usuarios en base de datos PostgreSQL usando Prisma.
  * Implementa el puerto UserRepositoryPort.
@@ -38,13 +64,15 @@ export class PrismaUserAdapter extends UserRepositoryPort {
       nombre: dbUser.nombre,
       email: dbUser.email,
       username: dbUser.username,
-      rol: dbUser.role?.name || dbUser.rol,
+      rol: resolveUserRol(dbUser),
       roleId: dbUser.roleId,
       estado: dbUser.estado,
       passwordHash: dbUser.passwordHash,
       fechaCreacion: dbUser.fechaCreacion.toISOString().split('T')[0],
       ultimoAcceso: dbUser.ultimoAcceso ? dbUser.ultimoAcceso.toISOString() : null,
       permissions: dbUser.role?.permissions.map((rp: any) => rp.permission.key) || [],
+      sidebarConfig: dbUser.sidebarConfig,
+      empleadoId: dbUser.empleadoId,
     });
   }
 
@@ -64,13 +92,15 @@ export class PrismaUserAdapter extends UserRepositoryPort {
       nombre: dbUser.nombre,
       email: dbUser.email,
       username: dbUser.username,
-      rol: dbUser.role?.name || dbUser.rol,
+      rol: resolveUserRol(dbUser),
       roleId: dbUser.roleId,
       estado: dbUser.estado,
       passwordHash: dbUser.passwordHash,
       fechaCreacion: dbUser.fechaCreacion.toISOString().split('T')[0],
       ultimoAcceso: dbUser.ultimoAcceso ? dbUser.ultimoAcceso.toISOString() : null,
       permissions: dbUser.role?.permissions.map((rp: any) => rp.permission.key) || [],
+      sidebarConfig: dbUser.sidebarConfig,
+      empleadoId: dbUser.empleadoId,
     });
   }
 
@@ -87,13 +117,15 @@ export class PrismaUserAdapter extends UserRepositoryPort {
       nombre: dbUser.nombre,
       email: dbUser.email,
       username: dbUser.username,
-      rol: dbUser.role?.name || dbUser.rol,
+      rol: resolveUserRol(dbUser),
       roleId: dbUser.roleId,
       estado: dbUser.estado,
       passwordHash: dbUser.passwordHash,
       fechaCreacion: dbUser.fechaCreacion.toISOString().split('T')[0],
       ultimoAcceso: dbUser.ultimoAcceso ? dbUser.ultimoAcceso.toISOString() : null,
       permissions: dbUser.role?.permissions.map((rp: any) => rp.permission.key) || [],
+      sidebarConfig: dbUser.sidebarConfig,
+      empleadoId: dbUser.empleadoId,
     });
   }
 
@@ -108,6 +140,8 @@ export class PrismaUserAdapter extends UserRepositoryPort {
         roleId: user.roleId,
         estado: user.estado,
         passwordHash: user.passwordHash,
+        sidebarConfig: user.sidebarConfig,
+        empleadoId: user.empleadoId,
       },
       include: this.userInclude,
     });
@@ -117,13 +151,15 @@ export class PrismaUserAdapter extends UserRepositoryPort {
       nombre: dbUser.nombre,
       email: dbUser.email,
       username: dbUser.username,
-      rol: dbUser.role?.name || dbUser.rol,
+      rol: resolveUserRol(dbUser),
       roleId: dbUser.roleId,
       estado: dbUser.estado,
       passwordHash: dbUser.passwordHash,
       fechaCreacion: dbUser.fechaCreacion.toISOString().split('T')[0],
       ultimoAcceso: dbUser.ultimoAcceso ? dbUser.ultimoAcceso.toISOString() : null,
       permissions: dbUser.role?.permissions.map((rp: any) => rp.permission.key) || [],
+      sidebarConfig: dbUser.sidebarConfig,
+      empleadoId: dbUser.empleadoId,
     });
   }
 
@@ -141,13 +177,15 @@ export class PrismaUserAdapter extends UserRepositoryPort {
         nombre: dbUser.nombre,
         email: dbUser.email,
         username: dbUser.username,
-        rol: dbUser.role?.name || dbUser.rol,
+        rol: resolveUserRol(dbUser),
         roleId: dbUser.roleId,
         estado: dbUser.estado,
         passwordHash: dbUser.passwordHash,
         fechaCreacion: dbUser.fechaCreacion.toISOString().split('T')[0],
         ultimoAcceso: dbUser.ultimoAcceso ? dbUser.ultimoAcceso.toISOString() : null,
         permissions: dbUser.role?.permissions.map((rp: any) => rp.permission.key) || [],
+        sidebarConfig: dbUser.sidebarConfig,
+        empleadoId: dbUser.empleadoId,
       });
     });
   }
@@ -164,6 +202,8 @@ export class PrismaUserAdapter extends UserRepositoryPort {
         estado: user.estado,
         passwordHash: user.passwordHash,
         ultimoAcceso: user.ultimoAcceso ? new Date(user.ultimoAcceso) : null,
+        sidebarConfig: user.sidebarConfig,
+        empleadoId: user.empleadoId,
       },
       include: this.userInclude,
     });
@@ -173,13 +213,15 @@ export class PrismaUserAdapter extends UserRepositoryPort {
       nombre: dbUser.nombre,
       email: dbUser.email,
       username: dbUser.username,
-      rol: dbUser.role?.name || dbUser.rol,
+      rol: resolveUserRol(dbUser),
       roleId: dbUser.roleId,
       estado: dbUser.estado,
       passwordHash: dbUser.passwordHash,
       fechaCreacion: dbUser.fechaCreacion.toISOString().split('T')[0],
       ultimoAcceso: dbUser.ultimoAcceso ? dbUser.ultimoAcceso.toISOString() : null,
       permissions: dbUser.role?.permissions.map((rp: any) => rp.permission.key) || [],
+      sidebarConfig: dbUser.sidebarConfig,
+      empleadoId: dbUser.empleadoId,
     });
   }
 

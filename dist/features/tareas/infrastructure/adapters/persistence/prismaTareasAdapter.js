@@ -1,5 +1,6 @@
 import webpush from 'web-push';
 import { env } from '../../../../../config/env.js';
+import { sendPushToRole } from '../../../../../shared/services/pushNotificationService.js';
 // Configure web-push with VAPID keys
 if (env.vapidPublicKey && env.vapidPrivateKey) {
     webpush.setVapidDetails(env.vapidEmail, env.vapidPublicKey, env.vapidPrivateKey);
@@ -158,7 +159,12 @@ export class PrismaTareasAdapter {
         }
         return row;
     }
-    async update(id, data) {
+    async update(id, data, updater) {
+        const currentTarea = await this.prisma.tarea.findUnique({
+            where: { id },
+        });
+        if (!currentTarea)
+            throw new Error('Tarea no encontrada.');
         const updateData = {
             fechaActualizacion: new Date(),
         };
@@ -192,6 +198,53 @@ export class PrismaTareasAdapter {
             data: updateData,
             include: tareaInclude,
         });
+        // ── Notifications on state change ─────────────────────────────────────────
+        if (data.estado !== undefined && data.estado !== currentTarea.estado) {
+            const isStart = data.estado === 'en_progreso';
+            const isComplete = data.estado === 'completada';
+            if (isStart || isComplete) {
+                try {
+                    let updaterName = 'Un colaborador';
+                    if (updater?.id) {
+                        const dbUser = await this.prisma.user.findUnique({ where: { id: updater.id } });
+                        if (dbUser) {
+                            updaterName = dbUser.nombre;
+                        }
+                    }
+                    const now = new Date();
+                    const fechaHoraStr = now.toLocaleString('es-EC', { timeZone: 'America/Guayaquil' });
+                    let notifTitle = '';
+                    let notifMessage = '';
+                    if (isStart) {
+                        notifTitle = 'Tarea Iniciada';
+                        notifMessage = `${updaterName} empezó con la tarea "${row.titulo}" el ${fechaHoraStr}.`;
+                    }
+                    else {
+                        notifTitle = 'Tarea Finalizada';
+                        notifMessage = `${updaterName} terminó la tarea "${row.titulo}" el ${fechaHoraStr}.`;
+                    }
+                    // UNA sola notificación para admin (expandRoleAliases cubre 'administrador' en la query)
+                    await this.prisma.notification.create({
+                        data: {
+                            title: notifTitle,
+                            message: notifMessage,
+                            rol: 'admin',
+                            createdBy: updaterName,
+                        },
+                    });
+                    // Send PWA push notification to administrators (single canonical role)
+                    const pushPayload = {
+                        title: notifTitle,
+                        body: notifMessage,
+                        data: { url: '/tareas' },
+                    };
+                    await sendPushToRole('admin', pushPayload).catch(() => { });
+                }
+                catch (err) {
+                    console.error('[Tareas Status Notification Error]', err);
+                }
+            }
+        }
         return row;
     }
     async delete(id) {

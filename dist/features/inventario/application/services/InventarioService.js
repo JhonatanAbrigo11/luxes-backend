@@ -37,8 +37,9 @@ export class InventarioService {
         if (!mat)
             throw new Error('Material no encontrado.');
         const delta = data.tipo === 'entrada' ? data.cantidad : -data.cantidad;
+        const unitLabel = typeof mat.unidadMedida === 'string' ? mat.unidadMedida : (mat.unidadMedida?.abreviacion || mat.unidadMedida?.nombre || 'unid');
         if (data.tipo === 'salida' && mat.stockActual + delta < 0) {
-            throw new Error(`Stock insuficiente. Disponible: ${mat.stockActual} ${mat.unidadMedida}.`);
+            throw new Error(`Stock insuficiente. Disponible: ${mat.stockActual} ${unitLabel}.`);
         }
         const mov = await this.repo.createMovimiento(data);
         await this.repo.adjustStock(data.materialId, delta);
@@ -68,14 +69,14 @@ export class InventarioService {
         });
         return prestamo;
     }
-    async devolverPrestamo(id) {
+    async devolverPrestamo(id, observacionDevolucion) {
         const prestamo = await this.repo.findPrestamoById(id);
         if (!prestamo)
             throw new Error('Préstamo no encontrado.');
         if (prestamo.estado === 'devuelto') {
             throw new Error('Esta herramienta ya fue devuelta.');
         }
-        const updated = await this.repo.returnPrestamo(id, new Date());
+        const updated = await this.repo.returnPrestamo(id, new Date(), observacionDevolucion);
         await this.repo.adjustStock(prestamo.materialId, prestamo.cantidad);
         // Sincronizar estado del material
         await this.repo.update(prestamo.materialId, {

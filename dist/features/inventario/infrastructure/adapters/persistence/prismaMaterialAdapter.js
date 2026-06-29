@@ -7,10 +7,34 @@ export class PrismaMaterialAdapter {
     mapRow(row) {
         if (!row)
             return null;
-        const { unidadMedida, ...rest } = row;
+        const { unidadMedida, detallesCompra, ...rest } = row;
+        const purchases = detallesCompra || [];
+        const approvedPurchases = purchases.filter((d) => d.ordenCompra && (d.ordenCompra.estado === 'APROBADA' || d.ordenCompra.estado === 'RECIBIDA'));
+        let cpp = row.precioCosto || 0;
+        let ultimaFechaCompra = null;
+        if (approvedPurchases.length > 0) {
+            const totalCost = approvedPurchases.reduce((sum, d) => sum + (d.cantidad * d.precioUnitario), 0);
+            const totalQty = approvedPurchases.reduce((sum, d) => sum + d.cantidad, 0);
+            if (totalQty > 0) {
+                cpp = totalCost / totalQty;
+            }
+            const fechasCompra = approvedPurchases
+                .map((d) => d.ordenCompra?.fechaRecepcion || d.ordenCompra?.fecha)
+                .filter(Boolean)
+                .map((f) => new Date(f).getTime());
+            if (fechasCompra.length > 0) {
+                ultimaFechaCompra = new Date(Math.max(...fechasCompra)).toISOString().split('T')[0];
+            }
+        }
         return {
             ...rest,
-            unidadMedida: row.unidadMedida?.nombre || 'unidades',
+            costoPromedioPonderado: cpp,
+            ultimaFechaCompra,
+            unidadMedida: row.unidadMedida ? {
+                id: row.unidadMedida.id,
+                nombre: row.unidadMedida.nombre,
+                abreviacion: row.unidadMedida.abreviacion
+            } : { nombre: 'unidades', abreviacion: 'unid' },
         };
     }
     async findAll(options) {
@@ -35,7 +59,10 @@ export class PrismaMaterialAdapter {
             const [rows, total] = await Promise.all([
                 this.prisma.material.findMany({
                     where,
-                    include: { unidadMedida: true },
+                    include: {
+                        unidadMedida: true,
+                        detallesCompra: { include: { ordenCompra: true } }
+                    },
                     orderBy: [{ tipo: 'asc' }, { nombre: 'asc' }],
                     skip,
                     take: limit,
@@ -50,7 +77,10 @@ export class PrismaMaterialAdapter {
         else {
             const rows = await this.prisma.material.findMany({
                 where,
-                include: { unidadMedida: true },
+                include: {
+                    unidadMedida: true,
+                    detallesCompra: { include: { ordenCompra: true } }
+                },
                 orderBy: [{ tipo: 'asc' }, { nombre: 'asc' }],
             });
             return rows.map(r => this.mapRow(r));
@@ -59,18 +89,22 @@ export class PrismaMaterialAdapter {
     async findById(id) {
         const row = await this.prisma.material.findUnique({
             where: { id },
-            include: { unidadMedida: true },
+            include: {
+                unidadMedida: true,
+                detallesCompra: { include: { ordenCompra: true } }
+            },
         });
         return this.mapRow(row);
     }
     async create(data) {
         const { unidadMedida, ...rest } = data;
         let unidadMedidaId = data.unidadMedidaId;
-        if (!unidadMedidaId && unidadMedida) {
+        const unitName = typeof unidadMedida === 'string' ? unidadMedida : unidadMedida?.nombre;
+        if (!unidadMedidaId && unitName) {
             const unit = await this.prisma.unidadMedida.upsert({
-                where: { nombre: unidadMedida },
+                where: { nombre: unitName },
                 update: {},
-                create: { nombre: unidadMedida }
+                create: { nombre: unitName }
             });
             unidadMedidaId = unit.id;
         }
@@ -86,11 +120,12 @@ export class PrismaMaterialAdapter {
     async update(id, data) {
         const { unidadMedida, ...rest } = data;
         let unidadMedidaId = data.unidadMedidaId;
-        if (!unidadMedidaId && unidadMedida) {
+        const unitName = typeof unidadMedida === 'string' ? unidadMedida : unidadMedida?.nombre;
+        if (!unidadMedidaId && unitName) {
             const unit = await this.prisma.unidadMedida.upsert({
-                where: { nombre: unidadMedida },
+                where: { nombre: unitName },
                 update: {},
-                create: { nombre: unidadMedida }
+                create: { nombre: unitName }
             });
             unidadMedidaId = unit.id;
         }
@@ -144,6 +179,7 @@ export class PrismaMaterialAdapter {
                 cantidad: data.cantidad,
                 motivo: data.motivo,
                 userId: data.userId,
+                ...(data.fecha ? { fecha: data.fecha } : {}),
                 material: { connect: { id: data.materialId } },
             },
         });
@@ -177,6 +213,9 @@ export class PrismaMaterialAdapter {
                 cantidad: data.cantidad,
                 comentarios: data.comentarios,
                 estado: data.estado ?? 'prestado',
+                fechaDevolucionEsperada: data.fechaDevolucionEsperada
+                    ? new Date(data.fechaDevolucionEsperada)
+                    : null,
                 material: { connect: { id: data.materialId } },
                 responsable: { connect: { id: data.responsableId } },
             },
@@ -187,10 +226,16 @@ export class PrismaMaterialAdapter {
         });
         return row;
     }
-    async returnPrestamo(id, fechaRetorno) {
+    async returnPrestamo(id, fechaRetorno, observacionDevolucion) {
         const row = await this.prisma.prestamo.update({
             where: { id },
-            data: { fechaRetorno, estado: 'devuelto' },
+            data: {
+                fechaRetorno,
+                estado: 'devuelto',
+                ...(observacionDevolucion != null && observacionDevolucion !== ''
+                    ? { observacionDevolucion }
+                    : {}),
+            },
             include: {
                 material: { select: { nombre: true, tipo: true, unidadMedida: true } },
                 responsable: { select: { nombre: true, username: true } },

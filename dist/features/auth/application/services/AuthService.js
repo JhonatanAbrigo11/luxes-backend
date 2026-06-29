@@ -1,5 +1,6 @@
 import { loginUser } from '../../domain/use-cases/loginUser.js';
 import { registerUser } from '../../domain/use-cases/registerUser.js';
+import { prisma } from '../../../../config/prismaClient.js';
 /**
  * Servicio de aplicación: orquesta casos de uso e inyecta puertos.
  */
@@ -63,7 +64,34 @@ export class AuthService {
             if (data.roleId)
                 u.roleId = data.roleId;
             u.estado = data.estado || 'activo';
-            await this.userRepository.update(u);
+            try {
+                // 1:1 Link - Generate Empleado
+                const records = await prisma.empleado.findMany({ select: { id: true } });
+                const maxNum = records.reduce((max, record) => {
+                    const match = record.id.match(/^EMP-(\d+)$/);
+                    if (!match)
+                        return max;
+                    const num = parseInt(match[1], 10);
+                    return num > max ? num : max;
+                }, 0);
+                const nextEmpId = `EMP-${String(maxNum + 1).padStart(3, '0')}`;
+                const dummyCedula = '99' + String(maxNum + 1).padStart(8, '0');
+                await prisma.empleado.create({
+                    data: {
+                        id: nextEmpId,
+                        nombre: data.nombre,
+                        cedula: dummyCedula,
+                        correo: data.email || `${data.username}@luxes.com`,
+                        cargo: data.rol || 'visor',
+                        passwordHash: u.passwordHash,
+                    },
+                });
+                u.empleadoId = nextEmpId;
+                await this.userRepository.update(u);
+            }
+            catch (empErr) {
+                console.warn('[createUser] No se pudo crear empleado vinculado:', empErr);
+            }
         }
         // Registrar en auditoría
         if (this.auditLogRepository) {
@@ -93,6 +121,41 @@ export class AuthService {
         if (data.estado !== undefined)
             user.estado = data.estado;
         const updated = await this.userRepository.update(user);
+        // Sync with Empleado
+        if (user.empleadoId) {
+            await prisma.empleado.update({
+                where: { id: user.empleadoId },
+                data: {
+                    nombre: user.nombre,
+                    correo: user.email,
+                }
+            });
+        }
+        else {
+            // Legacy user link creation
+            const records = await prisma.empleado.findMany({ select: { id: true } });
+            const maxNum = records.reduce((max, record) => {
+                const match = record.id.match(/^EMP-(\d+)$/);
+                if (!match)
+                    return max;
+                const num = parseInt(match[1], 10);
+                return num > max ? num : max;
+            }, 0);
+            const nextEmpId = `EMP-${String(maxNum + 1).padStart(3, '0')}`;
+            const dummyCedula = '99' + String(maxNum + 1).padStart(8, '0');
+            await prisma.empleado.create({
+                data: {
+                    id: nextEmpId,
+                    nombre: user.nombre,
+                    cedula: dummyCedula,
+                    correo: user.email || `${user.username}@luxes.com`,
+                    cargo: user.rol || 'visor',
+                    passwordHash: user.passwordHash,
+                }
+            });
+            user.empleadoId = nextEmpId;
+            await this.userRepository.update(user);
+        }
         // Registrar en auditoría
         if (this.auditLogRepository) {
             await this.auditLogRepository.create({
@@ -149,6 +212,12 @@ export class AuthService {
         if (!user)
             throw new Error('Usuario no encontrado');
         const result = await this.userRepository.delete(id);
+        // Sync deletion with Empleado
+        if (user.empleadoId) {
+            await prisma.empleado.delete({
+                where: { id: user.empleadoId }
+            }).catch(() => { });
+        }
         // Registrar en auditoría
         if (this.auditLogRepository) {
             await this.auditLogRepository.create({
@@ -242,5 +311,13 @@ export class AuthService {
         if (!this.auditLogRepository)
             return null;
         return this.auditLogRepository.create(log);
+    }
+    async updateSidebarConfig(userId, sidebarConfig) {
+        const user = await this.userRepository.findById(userId);
+        if (!user)
+            throw new Error('Usuario no encontrado');
+        user.sidebarConfig = sidebarConfig;
+        const updated = await this.userRepository.update(user);
+        return updated.toPublic();
     }
 }

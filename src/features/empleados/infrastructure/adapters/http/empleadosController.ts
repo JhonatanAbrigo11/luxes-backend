@@ -3,6 +3,7 @@ import { EmpleadoService } from '../../../application/services/EmpleadoService.j
 import { EmpleadoInput } from '../../../domain/ports/EmpleadoRepositoryPort.js';
 import { EmpleadoDocumentoTipo } from '../../../domain/entities/EmpleadoDocumento.js';
 import { isValidDocumentoTipo } from '../persistence/prismaEmpleadoDocumentoAdapter.js';
+import { prisma } from '../../../../../config/prismaClient.js';
 
 export interface EmpleadosController {
   list(req: Request, res: Response): Promise<Response>;
@@ -22,13 +23,22 @@ const parseBody = (body: Record<string, unknown>): EmpleadoInput => ({
   departamento: String(body.departamento ?? ''),
   telefono: String(body.telefono ?? ''),
   correo: String(body.correo ?? ''),
+  username: body.username ? String(body.username) : undefined,
   contraseña: body.contraseña ? String(body.contraseña) : undefined,
   cuentaBanco: String(body.cuentaBanco ?? ''),
   banco: String(body.banco ?? ''),
   tipoContrato: String(body.tipoContrato ?? 'Fijo'),
+  tieneContrato: body.tieneContrato !== undefined ? Boolean(body.tieneContrato) : undefined,
+  region: body.region ? String(body.region) : undefined,
+  decimoTerceroMensualizado:
+    body.decimoTerceroMensualizado !== undefined ? Boolean(body.decimoTerceroMensualizado) : undefined,
+  decimoCuartoMensualizado:
+    body.decimoCuartoMensualizado !== undefined ? Boolean(body.decimoCuartoMensualizado) : undefined,
   sueldoDiario: Number(body.sueldoDiario) || 0,
   direccion: String(body.direccion ?? ''),
   foto: body.foto ? String(body.foto) : null,
+  rol: body.rol ? String(body.rol) : undefined,
+  roleId: body.roleId ? String(body.roleId) : undefined,
 });
 
 const paramId = (req: Request): string => String(req.params.id);
@@ -61,10 +71,15 @@ export function createEmpleadosController(empleadoService: EmpleadoService): Emp
           });
         }
 
+        const user = await prisma.user.findUnique({ where: { empleadoId: paramId(req) } });
+
         return res.status(200).json({
           success: true,
           data: {
             ...empleado.toJSON(),
+            username: user?.username || '',
+            rol: user?.rol || '',
+            roleId: user?.roleId || '',
             documentos: (await empleadoService.listDocumentos(paramId(req))).map((d) => d.toJSON()),
           },
         });
@@ -79,10 +94,19 @@ export function createEmpleadosController(empleadoService: EmpleadoService): Emp
 
     async create(req, res) {
       try {
-        const empleado = await empleadoService.createEmpleado(parseBody(req.body ?? {}));
+        const body = parseBody(req.body ?? {});
+        const empleado = await empleadoService.createEmpleado(body);
+        
+        let message = undefined;
+        if (body.correo) {
+          const username = body.username?.trim() || body.correo.trim().split('@')[0] || `user_${body.cedula.trim()}`;
+          message = `Se ha generado un usuario de manera automática con el nombre de usuario '${username}', correo '${body.correo.trim().toLowerCase()}' y contraseña '123456'.`;
+        }
+
         return res.status(201).json({
           success: true,
           data: empleado.toJSON(),
+          message,
         });
       } catch (error) {
         const message = error instanceof Error ? error.message : 'Error al crear empleado';
@@ -128,12 +152,27 @@ export function createEmpleadosController(empleadoService: EmpleadoService): Emp
           data: { id: paramId(req) },
         });
       } catch (error) {
-        const message = error instanceof Error ? error.message : 'Error al eliminar empleado';
-        const status = message.includes('no encontrado') ? 404 : 500;
+        const prismaCode = error && typeof error === 'object' && 'code' in error
+          ? String((error as { code?: string }).code)
+          : '';
+        const isFkError = prismaCode === 'P2003' || prismaCode === 'P2014';
+        const message = isFkError
+          ? 'No se puede eliminar este colaborador porque tiene registros vinculados (órdenes de compra, tareas u otros). El usuario del portal se desactivará automáticamente al eliminar.'
+          : error instanceof Error
+            ? error.message
+            : 'Error al eliminar empleado';
+        const status = message.includes('no encontrado')
+          ? 404
+          : isFkError
+            ? 409
+            : 500;
         console.error('[empleados/remove]', error);
         return res.status(status).json({
           success: false,
-          error: { code: status === 404 ? 'NOT_FOUND' : 'INTERNAL_ERROR', message },
+          error: {
+            code: status === 404 ? 'NOT_FOUND' : status === 409 ? 'CONFLICT' : 'INTERNAL_ERROR',
+            message,
+          },
         });
       }
     },

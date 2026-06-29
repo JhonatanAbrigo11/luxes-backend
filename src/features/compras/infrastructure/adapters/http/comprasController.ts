@@ -55,9 +55,26 @@ export class ComprasController {
       const limit = req.query.limit ? parseInt(String(req.query.limit), 10) : undefined;
       const search = this.str(req.query.search);
       const estado = this.str(req.query.estado);
+      const estadosRaw = this.str(req.query.estados);
+      const estados = estadosRaw
+        ? estadosRaw.split(',').map((s) => s.trim()).filter(Boolean)
+        : undefined;
       const estadoPago = this.str(req.query.estadoPago);
+      const creadorRol = this.str(req.query.creadorRol);
+      const creadorId = this.str(req.query.creadorId);
+      const pendienteRecepcion = req.query.pendienteRecepcion === 'true' || req.query.pendienteRecepcion === '1';
 
-      const data = await this.service.getOrdenes({ page, limit, search, estado, estadoPago });
+      const data = await this.service.getOrdenes({
+        page,
+        limit,
+        search,
+        estado,
+        estados,
+        estadoPago,
+        creadorRol,
+        creadorId,
+        pendienteRecepcion,
+      });
       return this.ok(res, data);
     } catch (e) { return this.fail(res, e); }
   }
@@ -140,23 +157,36 @@ export class ComprasController {
 
   // ── Métodos de Pago ────────────────────────────────────────────────────────
 
-  async listMetodosPago(_req: Request, res: Response) {
+  async listMetodosPago(req: Request, res: Response) {
     try {
-      const data = await this.service.getMetodosPago();
+      const { desde, hasta } = req.query;
+      let desdeDate: Date | undefined;
+      let hastaLimit: Date | undefined;
+
+      if (desde && hasta) {
+        const desdeStr = String(desde);
+        desdeDate = desdeStr.includes('T') ? new Date(desdeStr) : new Date(desdeStr + 'T00:00:00');
+        const hastaStr = String(hasta);
+        hastaLimit = hastaStr.includes('T') ? new Date(hastaStr) : new Date(hastaStr + 'T23:59:59.999');
+      }
+
+      const data = await this.service.getMetodosPago(desdeDate, hastaLimit);
       return this.ok(res, data);
     } catch (e) { return this.fail(res, e); }
   }
 
   async createMetodoPago(req: Request, res: Response) {
     try {
-      const data = await this.service.createMetodoPago(req.body);
+      const { nombre, descripcion, tipo } = req.body || {};
+      const data = await this.service.createMetodoPago({ nombre, descripcion, tipo });
       return res.status(201).json({ success: true, data });
     } catch (e) { return this.fail(res, e, 400); }
   }
 
   async updateMetodoPago(req: Request, res: Response) {
     try {
-      const data = await this.service.updateMetodoPago(String(req.params.id), req.body);
+      const { nombre, descripcion, activo, tipo } = req.body || {};
+      const data = await this.service.updateMetodoPago(String(req.params.id), { nombre, descripcion, activo, tipo });
       return this.ok(res, data);
     } catch (e) { return this.fail(res, e, 400); }
   }
@@ -185,12 +215,16 @@ export class ComprasController {
         throw new Error('Usuario no autenticado o sesión inválida.');
       }
 
-      const { detalles } = req.body;
+      const { detalles, fechaRecepcion, notasRecepcion } = req.body;
       if (!Array.isArray(detalles)) {
         throw new Error('Los detalles recibidos son requeridos y deben ser un arreglo.');
       }
 
-      const data = await this.service.recepcionarOrden(id, userId, detalles);
+      const data = await this.service.recepcionarOrden(id, userId, {
+        fechaRecepcion,
+        notasRecepcion,
+        detalles,
+      });
       return this.ok(res, data);
     } catch (e) {
       return this.fail(res, e, 400);

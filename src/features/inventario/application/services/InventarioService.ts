@@ -52,13 +52,14 @@ export class InventarioService {
     return this.repo.listMovimientos(materialId);
   }
 
-  async registrarMovimiento(data: Omit<MovimientoData, 'id' | 'fecha'>): Promise<MovimientoData> {
+  async registrarMovimiento(data: Omit<MovimientoData, 'id' | 'fecha'> & { fecha?: Date }): Promise<MovimientoData> {
     const mat = await this.repo.findById(data.materialId);
     if (!mat) throw new Error('Material no encontrado.');
 
     const delta = data.tipo === 'entrada' ? data.cantidad : -data.cantidad;
+    const unitLabel = typeof mat.unidadMedida === 'string' ? mat.unidadMedida : (mat.unidadMedida?.abreviacion || mat.unidadMedida?.nombre || 'unid');
     if (data.tipo === 'salida' && mat.stockActual + delta < 0) {
-      throw new Error(`Stock insuficiente. Disponible: ${mat.stockActual} ${mat.unidadMedida}.`);
+      throw new Error(`Stock insuficiente. Disponible: ${mat.stockActual} ${unitLabel}.`);
     }
 
     const mov = await this.repo.createMovimiento(data);
@@ -95,14 +96,14 @@ export class InventarioService {
     return prestamo;
   }
 
-  async devolverPrestamo(id: string): Promise<PrestamoData> {
+  async devolverPrestamo(id: string, observacionDevolucion?: string | null): Promise<PrestamoData> {
     const prestamo = await this.repo.findPrestamoById(id);
     if (!prestamo) throw new Error('Préstamo no encontrado.');
     if (prestamo.estado === 'devuelto') {
       throw new Error('Esta herramienta ya fue devuelta.');
     }
 
-    const updated = await this.repo.returnPrestamo(id, new Date());
+    const updated = await this.repo.returnPrestamo(id, new Date(), observacionDevolucion);
     await this.repo.adjustStock(prestamo.materialId, prestamo.cantidad);
 
     // Sincronizar estado del material
@@ -112,5 +113,9 @@ export class InventarioService {
     });
 
     return updated;
+  }
+
+  async getMaterialHistorial(id: string): Promise<any> {
+    return this.repo.getMaterialHistorial(id);
   }
 }
