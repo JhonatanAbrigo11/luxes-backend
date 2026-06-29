@@ -2,8 +2,6 @@ export interface EmpleadoProps {
   id: string;
   nombre: string;
   cedula: string;
-  cargo: string;
-  departamento: string;
   telefono: string;
   correo: string;
   cuentaBanco: string;
@@ -16,14 +14,13 @@ export interface EmpleadoProps {
   sueldoDiario: number;
   direccion: string;
   foto?: string | null;
+  rol?: string;
 }
 
 export class Empleado {
   readonly id: string;
   readonly nombre: string;
   readonly cedula: string;
-  readonly cargo: string;
-  readonly departamento: string;
   readonly telefono: string;
   readonly correo: string;
   readonly cuentaBanco: string;
@@ -36,13 +33,12 @@ export class Empleado {
   readonly sueldoDiario: number;
   readonly direccion: string;
   readonly foto: string | null;
+  readonly rol?: string;
 
   constructor(props: EmpleadoProps) {
     this.id = props.id;
     this.nombre = props.nombre;
     this.cedula = props.cedula;
-    this.cargo = props.cargo;
-    this.departamento = props.departamento;
     this.telefono = props.telefono;
     this.correo = props.correo;
     this.cuentaBanco = props.cuentaBanco;
@@ -55,6 +51,7 @@ export class Empleado {
     this.sueldoDiario = props.sueldoDiario;
     this.direccion = props.direccion;
     this.foto = props.foto ?? null;
+    this.rol = props.rol;
   }
 
   toJSON(): EmpleadoProps {
@@ -62,8 +59,6 @@ export class Empleado {
       id: this.id,
       nombre: this.nombre,
       cedula: this.cedula,
-      cargo: this.cargo,
-      departamento: this.departamento,
       telefono: this.telefono,
       correo: this.correo,
       cuentaBanco: this.cuentaBanco,
@@ -76,6 +71,7 @@ export class Empleado {
       sueldoDiario: this.sueldoDiario,
       direccion: this.direccion,
       foto: this.foto ?? '',
+      rol: this.rol,
     };
   }
 }

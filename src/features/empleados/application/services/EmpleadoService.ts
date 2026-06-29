@@ -152,17 +152,21 @@ export class EmpleadoService {
       throw new Error('Empleado no encontrado');
     }
 
-    // Desvincular usuario antes de borrar el empleado: el FK users.empleado_id tiene
-    // onDelete Cascade y el usuario puede tener órdenes de compra, tareas, etc.
+    // Eliminar también el usuario vinculado en cascada (si es posible)
     const linkedUser = await prisma.user.findUnique({ where: { empleadoId: id } });
     if (linkedUser) {
-      await prisma.user.update({
-        where: { id: linkedUser.id },
-        data: {
-          empleadoId: null,
-          estado: 'inactivo',
-        },
-      });
+      try {
+        await prisma.user.delete({ where: { id: linkedUser.id } });
+      } catch (err) {
+        // Si falla por foreign keys, fallback a inactivarlo
+        await prisma.user.update({
+          where: { id: linkedUser.id },
+          data: {
+            empleadoId: null,
+            estado: 'inactivo',
+          },
+        });
+      }
     }
 
     await this.documentoRepository.deleteAllForEmpleado(id);

@@ -3,8 +3,6 @@ import { Empleado } from '../entities/Empleado.js';
 export type EmpleadoInput = {
   nombre: string;
   cedula: string;
-  cargo?: string;
-  departamento?: string;
   telefono?: string;
   correo?: string;
   username?: string;

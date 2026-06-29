@@ -19,8 +19,6 @@ export interface EmpleadosController {
 const parseBody = (body: Record<string, unknown>): EmpleadoInput => ({
   nombre: String(body.nombre ?? ''),
   cedula: String(body.cedula ?? ''),
-  cargo: String(body.cargo ?? ''),
-  departamento: String(body.departamento ?? ''),
   telefono: String(body.telefono ?? ''),
   correo: String(body.correo ?? ''),
   username: body.username ? String(body.username) : undefined,

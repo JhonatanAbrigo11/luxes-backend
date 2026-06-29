@@ -54,7 +54,8 @@ function parseFaseDatos(datos: string | null | undefined): Record<string, unknow
   }
 }
 
-function getPersonalEncuesta(
+async function getPersonalEncuesta(
+  proyectoId: string,
   datosInstalacion: InstalacionDatos,
   instalacion: {
     personalAsignado?: Array<{
@@ -64,22 +65,120 @@ function getPersonalEncuesta(
     }>;
   } | null,
 ) {
+  const personalList: Array<{ empleadoId: string; id: string; nombre: string; rol: string }> = [];
+
+  // 1. Personal de taller/instalación
   const desdeDatos = datosInstalacion.personalAsignado;
   if (Array.isArray(desdeDatos) && desdeDatos.length > 0) {
-    return desdeDatos.map((p: Record<string, unknown>, index: number) => ({
-      empleadoId: String(p.empleadoId || p.id || `personal-${index}`),
-      id: String(p.empleadoId || p.id || `personal-${index}`),
-      nombre: String(p.nombre || ''),
-      rol: String(p.rol || 'Técnico'),
-    }));
+    desdeDatos.forEach((p: Record<string, any>, index: number) => {
+      personalList.push({
+        empleadoId: String(p.empleadoId || p.id || `personal-${index}`),
+        id: String(p.empleadoId || p.id || `personal-${index}`),
+        nombre: String(p.nombre || ''),
+        rol: String(p.rol || 'Técnico'),
+      });
+    });
+  } else if (instalacion && Array.isArray(instalacion.personalAsignado)) {
+    instalacion.personalAsignado.forEach((p: any, index: number) => {
+      personalList.push({
+        empleadoId: p.empleadoId || `personal-${index}`,
+        id: p.empleadoId || `personal-${index}`,
+        nombre: p.empleado?.nombre || '',
+        rol: p.rol || 'Técnico',
+      });
+    });
   }
 
-  return (instalacion?.personalAsignado || []).map((p, index) => ({
-    empleadoId: p.empleadoId || `personal-${index}`,
-    id: p.empleadoId || `personal-${index}`,
-    nombre: p.empleado?.nombre || '',
-    rol: p.rol || 'Técnico',
-  }));
+  try {
+    // 2. Diseñador (de la fase de DISEÑO)
+    const faseDiseno = await prisma.proyectoFase.findUnique({
+      where: {
+        proyectoId_fase: {
+          proyectoId: String(proyectoId),
+          fase: 'DISEÑO',
+        },
+      },
+    });
+    if (faseDiseno?.datos) {
+      try {
+        const datosDiseno = JSON.parse(faseDiseno.datos);
+        if (datosDiseno && datosDiseno.disenadorNombre) {
+          const existeDisenador = personalList.some(
+            (p) => p.nombre.toLowerCase() === datosDiseno.disenadorNombre.toLowerCase()
+          );
+          if (!existeDisenador) {
+            personalList.push({
+              empleadoId: 'disenador',
+              id: 'disenador',
+              nombre: datosDiseno.disenadorNombre,
+              rol: 'Diseñador/Aprobador',
+            });
+          }
+        }
+      } catch (e) {
+        console.error('[getPersonalEncuesta] Error parsing diseño data:', e);
+      }
+    }
+
+    // 3. Ventas (de las proformas vinculadas al proyecto)
+    const dbProformas = await prisma.proforma.findMany({
+      where: { proyectoId: String(proyectoId) },
+    });
+    dbProformas.forEach((p) => {
+      if (p.atiende) {
+        const existeVentas = personalList.some(
+          (pa) => pa.nombre.toLowerCase() === p.atiende.toLowerCase()
+        );
+        if (!existeVentas) {
+          personalList.push({
+            empleadoId: `ventas-${p.id}`,
+            id: `ventas-${p.id}`,
+            nombre: p.atiende,
+            rol: 'Asesor de Ventas',
+          });
+        }
+      }
+    });
+
+    // También buscar en la fase COTIZACION por si acaso no tiene proyectoId guardado en DB pero sí en JSON
+    const faseCotizacion = await prisma.proyectoFase.findUnique({
+      where: {
+        proyectoId_fase: {
+          proyectoId: String(proyectoId),
+          fase: 'COTIZACION',
+        },
+      },
+    });
+    if (faseCotizacion?.datos) {
+      try {
+        const datosCotizacion = JSON.parse(faseCotizacion.datos);
+        if (datosCotizacion && Array.isArray(datosCotizacion.cotizacionesSeleccionadas)) {
+          datosCotizacion.cotizacionesSeleccionadas.forEach((c: any) => {
+            const atiendeVal = c.atiende || c.creadoPor;
+            if (atiendeVal && atiendeVal !== '—') {
+              const existeVentas = personalList.some(
+                (pa) => pa.nombre.toLowerCase() === atiendeVal.toLowerCase()
+              );
+              if (!existeVentas) {
+                personalList.push({
+                  empleadoId: `ventas-${c.id}`,
+                  id: `ventas-${c.id}`,
+                  nombre: atiendeVal,
+                  rol: 'Asesor de Ventas',
+                });
+              }
+            }
+          });
+        }
+      } catch (e) {
+        console.error('[getPersonalEncuesta] Error parsing cotización data:', e);
+      }
+    }
+  } catch (dbErr) {
+    console.error('[getPersonalEncuesta] Error querying DB:', dbErr);
+  }
+
+  return personalList;
 }
 
 function getInstalacionCompletionErrors(
@@ -538,16 +637,7 @@ export class ProyectosController {
         ...(datos as InstalacionDatos),
       };
 
-      if (
-        String(fase) === 'INSTALACION' &&
-        datos.instalacionCompletada === true &&
-        datosInstalacionAnterior.instalacionCompletada === true
-      ) {
-        return res.status(400).json({
-          success: false,
-          error: { code: 'INVALID_STATE', message: 'La instalación ya fue completada' },
-        });
-      }
+
 
       if (String(fase) === 'INSTALACION' && datos.instalacionCompletada === true) {
         const errores = getInstalacionCompletionErrors(
@@ -917,7 +1007,7 @@ export class ProyectosController {
           instalacionCompletada,
           encuestaCompletada: encuesta?.completada === true,
           encuesta: encuesta?.completada === true ? encuesta : null,
-          personal: getPersonalEncuesta(datosInstalacion, proyecto.instalacion),
+          personal: await getPersonalEncuesta(proyecto.id, datosInstalacion, proyecto.instalacion),
         },
       });
     } catch (error) {
@@ -982,7 +1072,7 @@ export class ProyectosController {
         });
       }
 
-      const personalBase = getPersonalEncuesta(datosInstalacion, proyecto.instalacion);
+      const personalBase = await getPersonalEncuesta(proyecto.id, datosInstalacion, proyecto.instalacion);
       const personalCalificado = personalBase.map((p) => {
         const encontrado = calificacionesPersonal.find(
           (c: Record<string, unknown>) => {

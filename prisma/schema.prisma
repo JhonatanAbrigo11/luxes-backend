@@ -329,8 +329,6 @@ model Empleado {
   id           String             @id
   nombre       String
   cedula       String             @unique
-  cargo        String             @default("")
-  departamento String             @default("")
   telefono     String             @default("")
   correo       String             @default("")
   cuentaBanco  String             @default("") @map("cuenta_banco")
