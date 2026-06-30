@@ -271,6 +271,7 @@ async function main() {
         nombre: user.nombre, 
         username: user.username,
         passwordHash: defaultPasswordHash,
+        estado: user.estado ?? 'activo',
         empleadoId: user.empleadoId
       },
       create: { ...user, passwordHash: defaultPasswordHash },

@@ -17,74 +17,106 @@ import { createConfiguracionModule } from './features/configuracion/infrastructu
 import { createProyectosModule } from './features/proyectos/infrastructure/composition/proyectosContainer.js';
 import { createImpresionesModule } from './features/impresiones/infrastructure/composition/impresionesContainer.js';
 import { createGastosModule } from './features/gastos/infrastructure/composition/gastosContainer.js';
+import { createLandingRoutes } from './features/landing/infrastructure/routes/landingRoutes.js';
 
 
 async function bootstrap() {
-  // Asegurar que existe el usuario de asistencia para el quiosco y taller
+  // Asegurar usuarios del sistema (activos + contraseña dev conocida)
   try {
     const bcrypt = await import('bcryptjs');
     const passwordHash = await bcrypt.default.hash('123456', 10);
     const { prisma } = await import('./config/prismaClient.js');
-    
-    await prisma.user.upsert({
-      where: { username: 'asistencia' },
-      update: {
-        rol: 'asistencia',
-        roleId: null,
-        passwordHash: passwordHash,
-      },
-      create: {
-        id: 'USR-ASIS-001',
-        nombre: 'Asistencia Kiosco',
-        email: 'asistencia@luxes.com',
+
+    const findRole = (...names: string[]) =>
+      prisma.role.findFirst({
+        where: {
+          OR: names.map((name) => ({
+            name: { equals: name, mode: 'insensitive' as const },
+          })),
+        },
+      });
+
+    const systemUsers = [
+      {
         username: 'asistencia',
-        rol: 'asistencia',
-        passwordHash: passwordHash,
-        estado: 'activo',
+        data: {
+          id: 'USR-ASIS-001',
+          nombre: 'Asistencia Kiosco',
+          email: 'asistencia@luxes.com',
+          rol: 'asistencia',
+          roleId: null as string | null,
+        },
       },
-    });
-    console.log('[Bootstrap] Usuario de asistencia verificado/creado con éxito.');
-
-    const adminRole = await prisma.role.findFirst({
-      where: { name: { equals: 'Administrador', mode: 'insensitive' } },
-    });
-
-    await prisma.user.upsert({
-      where: { username: 'admin' },
-      update: {
-        rol: 'Administrador',
-        roleId: adminRole?.id ?? null,
-        estado: 'activo',
-      },
-      create: {
-        id: 'USR-001',
-        nombre: 'Andrés Israel',
-        email: 'admin@luxes.com',
+      {
         username: 'admin',
-        rol: 'Administrador',
-        roleId: adminRole?.id ?? null,
-        passwordHash: passwordHash,
-        estado: 'activo',
+        data: {
+          id: 'USR-001',
+          nombre: 'Andrés Israel',
+          email: 'admin@luxes.com',
+          rol: 'Administrador',
+          roleId: (await findRole('Administrador'))?.id ?? null,
+        },
       },
-    });
-    console.log('[Bootstrap] Usuario admin verificado/corregido con éxito.');
-
-    await prisma.user.upsert({
-      where: { username: 'taller' },
-      update: {
-        rol: 'Taller',
-      },
-      create: {
-        id: 'USR-TALLER-001',
-        nombre: 'Taller Técnico',
-        email: 'taller@luxes.com',
+      {
         username: 'taller',
-        rol: 'Taller',
-        passwordHash: passwordHash,
-        estado: 'activo',
+        data: {
+          id: 'USR-TALLER-001',
+          nombre: 'Taller Técnico',
+          email: 'taller@luxes.com',
+          rol: 'Taller',
+          roleId: (await findRole('Taller'))?.id ?? null,
+        },
       },
-    });
-    console.log('[Bootstrap] Usuario de taller verificado/creado con éxito.');
+      {
+        username: 'impresion',
+        data: {
+          id: 'USR-003',
+          nombre: 'Impresor Principal',
+          email: 'impresion@luxes.com',
+          rol: 'Impresión',
+          roleId: (await findRole('Impresión', 'Impresion'))?.id ?? null,
+        },
+      },
+      {
+        username: 'disenador',
+        data: {
+          id: 'USR-005',
+          nombre: 'Diseñador Creativo',
+          email: 'disenador@luxes.com',
+          rol: 'Ventas / Diseñador',
+          roleId: (await findRole('Ventas / Diseñador', 'Diseñador'))?.id ?? null,
+        },
+      },
+      {
+        username: 'ventas',
+        data: {
+          id: 'USR-004',
+          nombre: 'Andrés Israel',
+          email: 'ventas@luxes.com',
+          rol: 'Ventas / Diseñador',
+          roleId: (await findRole('Ventas / Diseñador', 'Diseñador'))?.id ?? null,
+        },
+      },
+    ];
+
+    for (const { username, data } of systemUsers) {
+      await prisma.user.upsert({
+        where: { username },
+        update: {
+          rol: data.rol,
+          roleId: data.roleId,
+          estado: 'activo',
+          passwordHash,
+        },
+        create: {
+          ...data,
+          username,
+          passwordHash,
+          estado: 'activo',
+        },
+      });
+      console.log(`[Bootstrap] Usuario ${username} verificado/corregido con éxito.`);
+    }
   } catch (error) {
     console.error('[Bootstrap] Error en bootstrap de usuarios:', error);
   }
@@ -189,6 +221,7 @@ async function bootstrap() {
   app.use('/api/gastos', gastosRouter);
   app.use('/api/vehiculos', vehiculosRouter);
 
+  app.use('/api/landing', createLandingRoutes());
 
   app.use((_req, res) => {
     res.status(404).json({

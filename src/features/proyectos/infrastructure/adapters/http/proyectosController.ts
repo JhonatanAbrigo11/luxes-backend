@@ -205,6 +205,7 @@ const PROGRESO_POR_FASE: Record<string, number> = {
 };
 
 const proyectoInclude = {
+  cliente: true,
   fases: true,
   instalacion: {
     include: {
@@ -222,18 +223,33 @@ const proyectoInclude = {
   }
 };
 
+function mapClienteProyecto(p: any) {
+  const live = p.cliente;
+  if (live) {
+    const esEmpresa = live.tipo === 'Empresa';
+    return {
+      nombre: live.nombre || p.clienteNombre || '',
+      empresa: esEmpresa ? live.nombre : (p.clienteEmpresa || ''),
+      telefono: live.telefono ?? p.clienteTelefono ?? '',
+      email: live.email ?? p.clienteEmail ?? '',
+      direccion: live.direccion ?? p.clienteDireccion ?? '',
+    };
+  }
+  return {
+    nombre: p.clienteNombre,
+    empresa: p.clienteEmpresa,
+    telefono: p.clienteTelefono,
+    email: p.clienteEmail,
+    direccion: p.clienteDireccion,
+  };
+}
+
 function mapProyecto(p: any) {
   return {
     id: p.id,
     nombre: p.nombre,
     clienteId: p.clienteId,
-    cliente: {
-      nombre: p.clienteNombre,
-      empresa: p.clienteEmpresa,
-      telefono: p.clienteTelefono,
-      email: p.clienteEmail,
-      direccion: p.clienteDireccion,
-    },
+    cliente: mapClienteProyecto(p),
     responsable: p.responsable,
     requiereInstalacion: p.requiereInstalacion,
     faseActual: p.faseActual,
